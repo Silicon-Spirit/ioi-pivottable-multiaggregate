@@ -72,6 +72,27 @@ function makeRenderer(opts = {}) {
 			renderChart() {
 
 				const pivotData = new PivotData(this.$props);
+				let aggregatorList = [];
+				if (typeof pivotData.getAggregatorNames === "function") {
+					const names = pivotData.getAggregatorNames();
+					if (Array.isArray(names)) {
+						aggregatorList = names.filter((name) => typeof name === "string" && name.length);
+					}
+				}
+				if (!aggregatorList.length) {
+					if (Array.isArray(this.aggregatorName)) {
+						aggregatorList = this.aggregatorName.filter((name) => typeof name === "string" && name.length);
+					} else if (typeof this.aggregatorName === "string" && this.aggregatorName) {
+						aggregatorList = [this.aggregatorName];
+					}
+				}
+				if (!aggregatorList.length) {
+					const fallbackKeys = Object.keys(pivotData.props.aggregators || {});
+					if (fallbackKeys.length) {
+						aggregatorList = [fallbackKeys[0]];
+					}
+				}
+				const primaryAggregator = aggregatorList[0];
 
 				const buildChartElement = (data) => {
 					const chartHeight = (window.innerHeight / 100) * 60;
@@ -101,7 +122,7 @@ function makeRenderer(opts = {}) {
 					const headerRow = [];
 
 					if (colKeys.length === 1 && colKeys[0].length === 0) {
-						headerRow.push(this.aggregatorName);
+						headerRow.push(primaryAggregator || this.aggregatorName);
 					} else {
 						colKeys.map((col) => {
 							let filteredCols = col.filter(el => !!el);
@@ -112,7 +133,14 @@ function makeRenderer(opts = {}) {
 					const rawData = rowKeys.map((r) => {
 						const row = [];
 						colKeys.map((c) => {
-							const v = pivotData.getAggregator(r, c).value();
+							const aggregator =
+								primaryAggregator
+									? pivotData.getAggregator(r, c, primaryAggregator)
+									: pivotData.getAggregator(r, c);
+							const v =
+								aggregator && typeof aggregator.value === "function"
+									? aggregator.value()
+									: null;
 							row.push(v || "");
 						});
 						return row;
@@ -156,15 +184,560 @@ function makeRenderer(opts = {}) {
 			},
 		},
 		render() {
+			const formatCellDisplay = (aggregator, value) => {
+				let formatted = "";
+				if (aggregator && typeof aggregator.format === "function") {
+					formatted = aggregator.format(value);
+				} else if (value !== undefined && value !== null && value !== "") {
+					formatted = value;
+				}
+				const isEmpty =
+					formatted === "" ||
+					formatted === null ||
+					(typeof formatted === "number" && Number.isNaN(formatted));
+				if (isEmpty) {
+					return { formatted: "—", isEmpty: true };
+				}
+				if (typeof formatted !== "string") {
+					formatted = String(formatted);
+				}
+				return { formatted, isEmpty: false };
+			};
+			if (['table', 'heat-map-full', 'heat-map-col', 'heat-map-row'].includes(opts.mode)) {
+				const pivotData = new PivotData(this.$props);
+
+				let aggregatorList = [];
+				if (typeof pivotData.getAggregatorNames === "function") {
+					const names = pivotData.getAggregatorNames();
+					if (Array.isArray(names)) {
+						aggregatorList = names.filter((name) => typeof name === "string" && name.length);
+					}
+				}
+				if (!aggregatorList.length) {
+					if (Array.isArray(this.aggregatorName)) {
+						aggregatorList = this.aggregatorName.filter((name) => typeof name === "string" && name.length);
+					} else if (typeof this.aggregatorName === "string" && this.aggregatorName) {
+						aggregatorList = [this.aggregatorName];
+					}
+				}
+				if (!aggregatorList.length) {
+					const fallbackKeys = Object.keys(pivotData.props.aggregators || {});
+					if (fallbackKeys.length) {
+						aggregatorList = [fallbackKeys[0]];
+					}
+				}
+				if (!aggregatorList.length) {
+					aggregatorList = ["Count"];
+				}
+
+				const aggregatorCount = aggregatorList.length;
+
+				const rowAttrs = pivotData.props.rows;
+				const colAttrs = pivotData.props.cols;
+
+				const baseRowKeys = pivotData.getRowKeys();
+				const baseColKeys = pivotData.getColKeys();
+				const rowKeys = baseRowKeys.length ? baseRowKeys : [[]];
+				const colKeys = baseColKeys.length ? baseColKeys : [[]];
+
+				const effectiveColKeys =
+					aggregatorCount > 1
+						? colKeys.flatMap((colKey) =>
+								aggregatorList.map((aggName) => [...colKey, aggName])
+						  )
+						: colKeys.map((colKey) =>
+								colKey.length === 0 ? [aggregatorList[0]] : colKey
+						  );
+
+				const columnDescriptors =
+					aggregatorCount > 1
+						? colKeys.flatMap((colKey) =>
+								aggregatorList.map((aggName) => ({
+									colKey,
+									aggregatorName: aggName,
+								}))
+						  )
+						: colKeys.map((colKey) => ({
+								colKey,
+								aggregatorName: aggregatorList[0],
+						  }));
+
+				const headerColAttrs =
+					aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
+
+				const totalsRowSpan = headerColAttrs.length;
+
+				let valueCellColors = () => ({});
+				let rowTotalColors = () => ({});
+				let colTotalColors = () => ({});
+
+				if (aggregatorCount === 1 && opts.mode && opts.mode !== 'table') {
+					const colorScaleGenerator = this.tableColorScaleGenerator;
+					const rowTotalValues = colKeys.map((colKey) =>
+						pivotData.getAggregator([], colKey, aggregatorList[0]).value()
+					);
+					rowTotalColors = colorScaleGenerator(rowTotalValues);
+					const colTotalValues = rowKeys.map((rowKey) =>
+						pivotData.getAggregator(rowKey, [], aggregatorList[0]).value()
+					);
+					colTotalColors = colorScaleGenerator(colTotalValues);
+
+					if (opts.mode === "heat-map-full") {
+						const allValues = [];
+						rowKeys.forEach((rowKey) =>
+							colKeys.forEach((colKey) =>
+								allValues.push(
+									pivotData.getAggregator(rowKey, colKey, aggregatorList[0]).value()
+								)
+							)
+						);
+						const colorScale = colorScaleGenerator(allValues);
+						valueCellColors = (r, c, v) => colorScale(v);
+					} else if (opts.mode === "heat-map-row") {
+						const rowColorScales = {};
+						rowKeys.forEach((rowKey) => {
+							const rowValues = colKeys.map((colKey) =>
+								pivotData.getAggregator(rowKey, colKey, aggregatorList[0]).value()
+							);
+							rowColorScales[rowKey] = colorScaleGenerator(rowValues);
+						});
+						valueCellColors = (r, c, v) => rowColorScales[r](v);
+					} else if (opts.mode === "heat-map-col") {
+						const colColorScales = {};
+						colKeys.forEach((colKey) => {
+							const colValues = rowKeys.map((rowKey) =>
+								pivotData.getAggregator(rowKey, colKey, aggregatorList[0]).value()
+							);
+							colColorScales[colKey] = colorScaleGenerator(colValues);
+						});
+						valueCellColors = (r, c, v) => colColorScales[c](v);
+					}
+				}
+
+				const getClickHandler =
+					this.tableOptions && this.tableOptions.clickCallback
+						? (value, rowValues, colValues) => {
+								const filters = {};
+								for (const i of Object.keys(colAttrs || {})) {
+									const attr = colAttrs[i];
+									if (colValues[i] !== null) {
+										filters[attr] = colValues[i];
+									}
+								}
+								for (const i of Object.keys(rowAttrs || {})) {
+									const attr = rowAttrs[i];
+									if (rowValues[i] !== null) {
+										filters[attr] = rowValues[i];
+									}
+								}
+								return (e) =>
+									this.tableOptions.clickCallback(e, value, filters, pivotData);
+						  }
+						: null;
+
+				let headerRows;
+
+				if (!colAttrs.length) {
+					const rowCells = [];
+					if (rowAttrs.length) {
+						rowCells.push(
+							Vue.h(
+								"th",
+								{
+									class: ["pvtTotalGroupLabel"],
+									colSpan: rowAttrs.length || 1,
+								},
+								__("Totals")
+							)
+						);
+					}
+					if (rowAttrs.length) {
+						rowAttrs.forEach((r, i) => {
+							rowCells.push(
+								Vue.h(
+									"th",
+									{
+										class: ["pvtAxisLabel"],
+										key: `rowAttr${i}`,
+									},
+									r
+								)
+							);
+						});
+					}
+					aggregatorList.forEach((aggName, aggIndex) => {
+						rowCells.push(
+							Vue.h(
+								"th",
+								{
+									class: ["pvtColLabel"],
+									key: `aggHeader-${aggIndex}`,
+								},
+								aggName
+							)
+						);
+					});
+					headerRows = [Vue.h("tr", rowCells)];
+				} else {
+					headerRows = headerColAttrs.map((attr, attrIndex) => {
+						const cells = [];
+						const isLastHeaderRow = attrIndex === headerColAttrs.length - 1;
+
+						if (!isLastHeaderRow && rowAttrs.length !== 0 && attrIndex === 0) {
+							const rowSpan = headerColAttrs.length - 1;
+							if (rowSpan > 0) {
+								cells.push(
+									Vue.h("th", {
+										colSpan: rowAttrs.length,
+										rowSpan,
+									})
+								);
+							}
+						}
+
+						if (isLastHeaderRow && rowAttrs.length !== 0) {
+							rowAttrs.forEach((r, i) => {
+								cells.push(
+									Vue.h(
+										"th",
+										{
+											class: ["pvtAxisLabel"],
+											key: `rowAttr${i}`,
+										},
+										r
+									)
+								);
+							});
+						}
+
+						cells.push(
+							Vue.h(
+								"th",
+								{
+									class: ["pvtAxisLabel"],
+								},
+								attr
+							)
+						);
+
+						effectiveColKeys.forEach((colKey, i) => {
+							const span = this.spanSize(effectiveColKeys, i, attrIndex);
+							if (span === -1) {
+								return;
+							}
+							cells.push(
+								Vue.h(
+									"th",
+									{
+										class: ["pvtColLabel"],
+										key: `colKey${i}-${attrIndex}`,
+										colSpan: span,
+										rowSpan: 1,
+									},
+									colKey[attrIndex] != null ? colKey[attrIndex] : ""
+								)
+							);
+						});
+
+						if (
+							attrIndex === 0 &&
+							this.rowTotal &&
+							aggregatorCount > 0 &&
+							headerColAttrs.length > 1
+						) {
+							const remainingRows = headerColAttrs.length - 1;
+							if (remainingRows > 0) {
+								cells.push(
+									Vue.h(
+										"th",
+										{
+											class: ["pvtTotalGroupLabel"],
+											colSpan: aggregatorCount,
+											rowSpan: remainingRows,
+										},
+										__("Totals")
+									)
+								);
+							}
+						}
+
+						if (isLastHeaderRow && this.rowTotal && aggregatorCount > 0) {
+							if (aggregatorCount > 1) {
+							aggregatorList.forEach((aggName, aggIndex) => {
+								cells.push(
+									Vue.h(
+										"th",
+										{
+											class: ["pvtColLabel"],
+											key: `totalHeader-${aggIndex}`,
+										},
+										aggName
+									)
+								);
+							});
+							} else {
+								cells.push(
+									Vue.h(
+										"th",
+										{
+											class: ["pvtColLabel"],
+										},
+										__("Totals")
+									)
+								);
+							}
+						}
+
+						return Vue.h(
+							"tr",
+							{
+								key: `colAttrs${attrIndex}`,
+							},
+							cells
+						);
+					});
+				}
+
+				const bodyRows = rowKeys.map((rowKey, rowIndex) => {
+					const rowCells = [];
+
+					rowKey.forEach((txt, attrIndex) => {
+						const span = this.spanSize(rowKeys, rowIndex, attrIndex);
+						if (span === -1) {
+							return;
+						}
+						rowCells.push(
+							Vue.h(
+								"th",
+								{
+									class: ["pvtRowLabel"],
+									key: `rowKeyLabel${rowIndex}-${attrIndex}`,
+									rowSpan: span,
+									colSpan:
+										attrIndex === rowAttrs.length - 1 && headerColAttrs.length !== 0
+											? 2
+											: 1,
+								},
+								txt
+							)
+						);
+					});
+
+					columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
+						const aggregator = pivotData.getAggregator(rowKey, colKey, aggregatorName);
+						const value =
+							aggregator && typeof aggregator.value === "function"
+								? aggregator.value()
+								: null;
+						const { formatted, isEmpty } = formatCellDisplay(aggregator, value);
+						const cellClasses = ["pvVal"];
+						if (isEmpty) {
+							cellClasses.push("pvtEmpty");
+						}
+						rowCells.push(
+							Vue.h(
+								"td",
+								Object.assign(
+									{
+										class: cellClasses,
+										style: valueCellColors(rowKey, colKey, value),
+										key: `pvtVal${rowIndex}-${descriptorIndex}`,
+									},
+									getClickHandler
+										? {
+												onClick: getClickHandler(value, rowKey, colKey),
+										  }
+										: {}
+								),
+								formatted
+							)
+						);
+					});
+
+					if (this.rowTotal) {
+						aggregatorList.forEach((aggName, aggIndex) => {
+							const totalAggregator = pivotData.getAggregator(rowKey, [], aggName);
+							const totalValue =
+								totalAggregator && typeof totalAggregator.value === "function"
+									? totalAggregator.value()
+									: null;
+							const totalDisplay = formatCellDisplay(totalAggregator, totalValue);
+							const totalClasses = ["pvtTotal"];
+							if (totalDisplay.isEmpty) {
+								totalClasses.push("pvtEmpty");
+							}
+							rowCells.push(
+								Vue.h(
+									"td",
+									Object.assign(
+										{
+											class: totalClasses,
+											style: colTotalColors(totalValue),
+											key: `rowTotal${rowIndex}-${aggIndex}`,
+										},
+										getClickHandler
+											? {
+													onClick: getClickHandler(totalValue, rowKey, [null]),
+											  }
+											: {}
+									),
+									totalDisplay.formatted
+								)
+							);
+						});
+					}
+
+					return Vue.h(
+						"tr",
+						{
+							key: `rowKeyRow${rowIndex}`,
+						},
+						rowCells
+					);
+				});
+
+				if (this.colTotal) {
+					const totalCells = [];
+				const labelColSpan = rowAttrs.length + (headerColAttrs.length > 0 ? 1 : 0);
+
+				if (labelColSpan > 0 && headerColAttrs.length) {
+					totalCells.push(
+						Vue.h(
+							"th",
+							{
+								class: ["pvtTotalLabel"],
+								colSpan: labelColSpan,
+							},
+							__("Totals")
+						)
+					);
+				}
+
+					columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
+						const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
+						const totalValue =
+							totalAggregator && typeof totalAggregator.value === "function"
+								? totalAggregator.value()
+								: null;
+						const columnDisplay = formatCellDisplay(totalAggregator, totalValue);
+						const columnClasses = ["pvtTotal"];
+						if (columnDisplay.isEmpty) {
+							columnClasses.push("pvtEmpty");
+						}
+						totalCells.push(
+							Vue.h(
+								"td",
+								Object.assign(
+									{
+										class: columnClasses,
+										style: rowTotalColors(totalValue),
+										key: `colTotal${descriptorIndex}`,
+									},
+									getClickHandler
+										? {
+												onClick: getClickHandler(totalValue, [null], colKey),
+										  }
+										: {}
+								),
+								columnDisplay.formatted
+							)
+						);
+					});
+
+					if (this.rowTotal) {
+						aggregatorList.forEach((aggName, aggIndex) => {
+							const grandAggregator = pivotData.getAggregator([], [], aggName);
+							const grandValue =
+								grandAggregator && typeof grandAggregator.value === "function"
+									? grandAggregator.value()
+									: null;
+							const grandDisplay = formatCellDisplay(grandAggregator, grandValue);
+							const grandClasses = ["pvtGrandTotal"];
+							if (grandDisplay.isEmpty) {
+								grandClasses.push("pvtEmpty");
+							}
+							totalCells.push(
+								Vue.h(
+									"td",
+									Object.assign(
+										{
+											class: grandClasses,
+											key: `grandTotal${aggIndex}`,
+										},
+										getClickHandler
+											? {
+													onClick: getClickHandler(grandValue, [null], [null]),
+											  }
+											: {}
+									),
+									grandDisplay.formatted
+								)
+							);
+						});
+					}
+
+					bodyRows.push(Vue.h("tr", totalCells));
+				}
+
+				return Vue.h(
+					"table",
+					{
+						class: ["pvtTable"],
+					},
+					[Vue.h("thead", headerRows), Vue.h("tbody", null, bodyRows)]
+				);
+			}
+
+			if (false) { // legacy single-aggregator rendering retained for reference
 
 			if (['table', 'heat-map-full', 'heat-map-col', 'heat-map-row'].includes(opts.mode)) {
 
 				const pivotData = new PivotData(this.$props);
+				const aggregatorNames = pivotData.getAggregatorNames
+					? pivotData.getAggregatorNames()
+					: [this.aggregatorName];
+				const primaryAggregator = aggregatorNames[0];
+				const getAggregatorResult = (rowKey, colKey) => {
+					if (aggregatorNames.length > 1) {
+						return pivotData.getAggregator(rowKey, colKey);
+					}
+					return pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+				};
+				const getAggregatorValue = (rowKey, colKey) => {
+					if (!primaryAggregator) {
+						const aggregator = pivotData.getAggregator(rowKey, colKey);
+						if (aggregator && typeof aggregator.value === "function") {
+							return aggregator.value();
+						}
+						const fallbackName = aggregatorNames[0];
+						if (fallbackName) {
+							const fallbackAggregator = pivotData.getAggregator(
+								rowKey,
+								colKey,
+								fallbackName
+							);
+							if (
+								fallbackAggregator &&
+								typeof fallbackAggregator.value === "function"
+							) {
+								return fallbackAggregator.value();
+							}
+						}
+						return null;
+					}
+					const aggregator = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+					return aggregator && typeof aggregator.value === "function"
+						? aggregator.value()
+						: null;
+				};
 				const rowKeys = pivotData.getRowKeys();
 				const colKeys = pivotData.getColKeys();
 				const colAttrs = pivotData.props.cols;
 				const rowAttrs = pivotData.props.rows;
-				const grandTotalAggregator = pivotData.getAggregator([], []);
+				const grandTotalAggregator =
+					aggregatorNames.length > 1
+						? pivotData.getAggregator([], [])
+						: pivotData.getAggregator([], [], primaryAggregator);
 
 				// eslint-disable-next-line no-unused-vars
 				let valueCellColors = () => { };
@@ -176,11 +749,11 @@ function makeRenderer(opts = {}) {
 				if (opts.mode && opts.mode !== 'table') {
 					const colorScaleGenerator = this.tableColorScaleGenerator;
 					const rowTotalValues = colKeys.map((x) =>
-						pivotData.getAggregator([], x).value()
+						getAggregatorValue([], x)
 					);
 					rowTotalColors = colorScaleGenerator(rowTotalValues);
 					const colTotalValues = rowKeys.map((x) =>
-						pivotData.getAggregator(x, []).value()
+						getAggregatorValue(x, [])
 					);
 					colTotalColors = colorScaleGenerator(colTotalValues);
 
@@ -188,7 +761,7 @@ function makeRenderer(opts = {}) {
 						const allValues = [];
 						rowKeys.map((r) =>
 							colKeys.map((c) =>
-								allValues.push(pivotData.getAggregator(r, c).value())
+								allValues.push(getAggregatorValue(r, c))
 							)
 						);
 						const colorScale = colorScaleGenerator(allValues);
@@ -197,7 +770,7 @@ function makeRenderer(opts = {}) {
 						const rowColorScales = {};
 						rowKeys.map((r) => {
 							const rowValues = colKeys.map((x) =>
-								pivotData.getAggregator(r, x).value()
+								getAggregatorValue(r, x)
 							);
 							rowColorScales[r] = colorScaleGenerator(rowValues);
 						});
@@ -206,7 +779,7 @@ function makeRenderer(opts = {}) {
 						const colColorScales = {};
 						colKeys.map((c) => {
 							const colValues = rowKeys.map((x) =>
-								pivotData.getAggregator(x, c).value()
+								getAggregatorValue(x, c)
 							);
 							colColorScales[c] = colorScaleGenerator(colValues);
 						});
@@ -326,7 +899,14 @@ function makeRenderer(opts = {}) {
 
 						Vue.h("tbody", null, [
 							rowKeys.map((rowKey, i) => {
-								const totalAggregator = pivotData.getAggregator(rowKey, []);
+								const totalAggregator =
+									aggregatorNames.length > 1
+										? pivotData.getAggregator(rowKey, [])
+										: pivotData.getAggregator(rowKey, [], primaryAggregator);
+								const totalValue =
+									aggregatorNames.length > 1
+										? getAggregatorValue(rowKey, [])
+										: totalAggregator.value();
 								return Vue.h(
 									"tr",
 									{
@@ -354,7 +934,7 @@ function makeRenderer(opts = {}) {
 										}),
 
 										colKeys.map((colKey, j) => {
-											const aggregator = pivotData.getAggregator(rowKey, colKey);
+											const aggregator = getAggregatorResult(rowKey, colKey);
 											return Vue.h(
 												"td",
 												Object.assign(
@@ -363,21 +943,29 @@ function makeRenderer(opts = {}) {
 														style: valueCellColors(
 															rowKey,
 															colKey,
-															aggregator.value()
+															primaryAggregator && aggregator && typeof aggregator.value === "function"
+																? aggregator.value()
+																: primaryAggregator
+																? getAggregatorValue(rowKey, colKey)
+																: null
 														),
 														key: `pvtVal${i}-${j}`,
 													},
 													getClickHandler
 														? {
 															onClick: getClickHandler(
-																aggregator.value(),
+																primaryAggregator && aggregator && typeof aggregator.value === "function"
+																	? aggregator.value()
+																	: getAggregatorValue(rowKey, colKey),
 																rowKey,
 																colKey
 															),
 														}
 														: {}
 												),
-												aggregator.format(aggregator.value())
+												Array.isArray(aggregatorNames) && aggregatorNames.length > 1
+													? this.renderAggregatorContent(aggregator, aggregatorNames)
+													: aggregator.format(aggregator.value())
 											);
 										}),
 
@@ -387,19 +975,23 @@ function makeRenderer(opts = {}) {
 												Object.assign(
 													{
 														class: ["pvtTotal"],
-														style: colTotalColors(totalAggregator.value()),
+														style: colTotalColors(
+															totalValue
+														),
 													},
 													getClickHandler
 														? {
 															onClick: getClickHandler(
-																totalAggregator.value(),
+																totalValue,
 																rowKey,
 																[null]
 															),
 														}
 														: {}
 												),
-												totalAggregator.format(totalAggregator.value())
+												Array.isArray(aggregatorNames) && aggregatorNames.length > 1
+													? this.renderAggregatorContent(totalAggregator, aggregatorNames)
+													: totalAggregator.format(totalValue)
 											)
 											: undefined,
 									]
@@ -421,26 +1013,37 @@ function makeRenderer(opts = {}) {
 
 								this.colTotal
 									? colKeys.map((colKey, i) => {
-										const totalAggregator = pivotData.getAggregator([], colKey);
+										const totalAggregator =
+											aggregatorNames.length > 1
+												? pivotData.getAggregator([], colKey)
+												: pivotData.getAggregator([], colKey, primaryAggregator);
+										const totalValue =
+											aggregatorNames.length > 1
+												? getAggregatorValue([], colKey)
+												: totalAggregator.value();
 										return Vue.h(
 											"td",
 											Object.assign(
 												{
 													class: ["pvtTotal"],
-													style: rowTotalColors(totalAggregator.value()),
+													style: rowTotalColors(
+														totalValue
+													),
 													key: `total${i}`,
 												},
 												getClickHandler
 													? {
 														onClick: getClickHandler(
-															totalAggregator.value(),
+															totalValue,
 															[null],
 															colKey
 														),
 													}
 													: {}
 											),
-											totalAggregator.format(totalAggregator.value())
+											Array.isArray(aggregatorNames) && aggregatorNames.length > 1
+												? this.renderAggregatorContent(totalAggregator, aggregatorNames)
+												: totalAggregator.format(totalValue)
 										);
 									})
 									: undefined,
@@ -455,20 +1058,26 @@ function makeRenderer(opts = {}) {
 											getClickHandler
 												? {
 													onClick: getClickHandler(
-														grandTotalAggregator.value(),
+														grandTotalAggregator && typeof grandTotalAggregator.value === "function"
+															? grandTotalAggregator.value()
+															: null,
 														[null],
 														[null]
 													),
 												}
 												: {}
 										),
-										grandTotalAggregator.format(grandTotalAggregator.value())
+										Array.isArray(aggregatorNames) && aggregatorNames.length > 1
+											? this.renderAggregatorContent(grandTotalAggregator, aggregatorNames)
+											: grandTotalAggregator.format(grandTotalAggregator.value())
 									)
 									: undefined,
 							]),
 						]),
 					]
 				)
+			}
+
 			} else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
 
 				return Vue.h('div', {

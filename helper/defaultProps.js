@@ -5,8 +5,14 @@ export default {
 			required: true,
 		},
 		aggregatorName: {
-			type: String,
+			type: [String, Array],
 			default: __("Count"),
+		},
+		aggregatorNames: {
+			type: Array,
+			default: function () {
+				return [];
+			},
 		},
 		cols: {
 			type: Array,

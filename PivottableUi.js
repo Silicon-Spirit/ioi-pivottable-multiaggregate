@@ -57,11 +57,49 @@ export default {
 
 			return translated_renderers;
 		},
-		numValsAllowed() {
-			return (
-				aggregators[this.propsData.aggregatorName || this.aggregatorName]([])()
-					.numInputs || 0
+		selectedAggregators() {
+			if (this.propsData.aggregatorNames && this.propsData.aggregatorNames.length) {
+				return this.propsData.aggregatorNames;
+			}
+			if (Array.isArray(this.aggregatorNames) && this.aggregatorNames.length) {
+				return this.aggregatorNames;
+			}
+			const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
+				Object.keys(aggregators).includes(name)
 			);
+			if (preferredDefaults.length) {
+				return preferredDefaults;
+			}
+			const fallback =
+				this.propsData.aggregatorName ||
+				(this.aggregatorName && !Array.isArray(this.aggregatorName)
+					? this.aggregatorName
+					: null) ||
+				Object.keys(aggregators)[0];
+			return fallback ? [fallback] : [];
+		},
+		availableAggregators() {
+			return Object.keys(aggregators);
+		},
+		valueAttrOptions() {
+			return Object.keys(this.attrValues)
+				.filter(
+					(attr) =>
+						!this.hiddenAttributes.includes(attr) &&
+						!this.hiddenFromAggregators.includes(attr)
+				)
+				.sort(sortAs(this.unusedOrder));
+		},
+		numValsAllowed() {
+			const requiredInputs = this.selectedAggregators.reduce((largest, name) => {
+				if (!aggregators[name]) {
+					return largest;
+				}
+				const numInputs =
+					aggregators[name]([])().numInputs || 0;
+				return Math.max(largest, numInputs);
+			}, 0);
+			return requiredInputs;
 		},
 		rowAttrs() {
 			return this.propsData.rows.filter(
@@ -93,6 +131,7 @@ export default {
 		return {
 			propsData: {
 				aggregatorName: "",
+				aggregatorNames: [],
 				rendererName: "",
 				rowOrder: "key_a_to_z",
 				colOrder: "key_a_to_z",
@@ -136,6 +175,32 @@ export default {
 		this.propsData.vals = this.vals.slice();
 		this.propsData.rows = this.rows;
 		this.propsData.cols = this.cols;
+		const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
+			Object.keys(aggregators).includes(name)
+		);
+		const initialAggregators =
+			Array.isArray(this.aggregatorNames) && this.aggregatorNames.length
+				? this.aggregatorNames.slice()
+				: Array.isArray(this.aggregatorName)
+				? this.aggregatorName.slice()
+				: [
+						this.propsData.aggregatorName ||
+							(this.aggregatorName && typeof this.aggregatorName === "string"
+								? this.aggregatorName
+								: null) ||
+							preferredDefaults[0] ||
+							Object.keys(aggregators)[0],
+				  ];
+		if (!initialAggregators.length && preferredDefaults.length) {
+			initialAggregators.push(...preferredDefaults);
+		} else if (preferredDefaults.length) {
+			preferredDefaults.forEach((name) => {
+				if (!initialAggregators.includes(name)) {
+					initialAggregators.push(name);
+				}
+			});
+		}
+		this.updateAggregatorSelection(initialAggregators);
 		this.unusedOrder = this.unusedAttrs;
 		Object.keys(this.attrValues).map(this.assignValue);
 		Object.keys(this.openStatus).map(this.assignValue);
@@ -149,6 +214,27 @@ export default {
 			this.unusedOrder = this.unusedAttrs;
 			Object.keys(this.attrValues).map(this.assignValue);
 			Object.keys(this.openStatus).map(this.assignValue);
+		},
+		aggregatorName(newValue) {
+			if (Array.isArray(newValue)) {
+				this.updateAggregatorSelection(newValue);
+			} else if (typeof newValue === "string") {
+				const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
+					Object.keys(aggregators).includes(name)
+				);
+				const next = [newValue];
+				preferredDefaults.forEach((name) => {
+					if (!next.includes(name)) {
+						next.push(name);
+					}
+				});
+				this.updateAggregatorSelection(next);
+			}
+		},
+		aggregatorNames(newValue) {
+			if (Array.isArray(newValue)) {
+				this.updateAggregatorSelection(newValue);
+			}
 		},
 	},
 	methods: {
@@ -166,6 +252,120 @@ export default {
 			return (value) => {
 				this.propsData[key] = value;
 			};
+		},
+		normalizeAggregators(list = []) {
+			const available = this.availableAggregators;
+			const seen = new Set();
+			const normalized = [];
+
+			list.forEach((name) => {
+				if (typeof name !== "string") {
+					return;
+				}
+				if (!available.includes(name)) {
+					return;
+				}
+				if (seen.has(name)) {
+					return;
+				}
+				normalized.push(name);
+				seen.add(name);
+			});
+
+			if (!normalized.length) {
+				const fallbackCandidates = [
+					this.propsData.aggregatorName,
+					Array.isArray(this.aggregatorName) ? this.aggregatorName[0] : this.aggregatorName,
+					available[0],
+				].filter(Boolean);
+
+				const fallback = fallbackCandidates.find((name) => available.includes(name));
+				if (fallback) {
+					normalized.push(fallback);
+				}
+			}
+
+			return normalized;
+		},
+		ensureValSlots(aggregatorList) {
+			const required = aggregatorList.reduce((largest, name) => {
+				if (!aggregators[name]) {
+					return largest;
+				}
+				const numInputs =
+					aggregators[name]([])().numInputs || 0;
+				return Math.max(largest, numInputs);
+			}, 0);
+
+			const allowedAttributes = this.valueAttrOptions;
+			const fallbackAttr =
+				allowedAttributes[0] ||
+				this.propsData.vals[0] ||
+				this.vals[0] ||
+				null;
+
+			const nextVals = this.propsData.vals.slice(0, required);
+			while (nextVals.length < required) {
+				const suggestion =
+					allowedAttributes[nextVals.length] || fallbackAttr || null;
+				nextVals.push(suggestion);
+			}
+
+			if (required === 0) {
+				this.propsData.vals = [];
+			} else {
+				this.propsData.vals = nextVals;
+			}
+		},
+		updateAggregatorSelection(list) {
+			const normalized = this.normalizeAggregators(list);
+			if (!normalized.length) {
+				return;
+			}
+
+			const current = this.propsData.aggregatorNames || [];
+			const isSameLength = current.length === normalized.length;
+			const isSameOrder =
+				isSameLength && current.every((value, index) => value === normalized[index]);
+
+			if (!isSameOrder) {
+				this.propsData.aggregatorNames = normalized;
+			}
+
+			this.propsData.aggregatorName = normalized[0];
+			this.ensureValSlots(normalized);
+		},
+		addAggregator() {
+			const current = this.selectedAggregators.slice();
+			const next = this.availableAggregators.find((name) => !current.includes(name));
+			if (!next) {
+				return;
+			}
+			current.push(next);
+			this.updateAggregatorSelection(current);
+		},
+		removeAggregator(index) {
+			const current = this.selectedAggregators.slice();
+			if (current.length <= 1) {
+				return;
+			}
+			current.splice(index, 1);
+			this.updateAggregatorSelection(current);
+		},
+		changeAggregator(index, value) {
+			if (!this.availableAggregators.includes(value)) {
+				return;
+			}
+			const current = this.selectedAggregators.slice();
+			if (current[index] === value) {
+				return;
+			}
+			const duplicateIndex = current.findIndex((item, idx) => item === value && idx !== index);
+			if (duplicateIndex !== -1) {
+				current.splice(duplicateIndex, 1);
+			}
+			current[index] = value;
+			this.updateAggregatorSelection(current);
 		},
 		updateValueFilter({ attribute, valueFilter }) {
 			this.propsData.valueFilter[attribute] = { ...valueFilter };
@@ -294,47 +494,98 @@ export default {
 							class: ["pvtVals"],
 						},
 						[
-							h("div", [
-								h(Dropdown, {
-									style: {
-										display: "inline-block",
-									},
-									values: Object.keys(aggregators),
-									value: aggregatorName,
-									title: __('Select the aggregation method for the data'),
-									onInput: (value) => {
-										this.propUpdater("aggregatorName")(value);
-									},
-								}),
-								h(
-									"a",
-									{
-										class: ["pvtRowOrder"],
-										title: __('Update the order of the rows'),
-										role: "button",
-										onClick: () => {
-											this.propUpdater("rowOrder")(
-												this.sortIcons[this.propsData.rowOrder].next
-											);
+							h(
+								"div",
+								{ class: ["pvtAggregatorList"] },
+								this.selectedAggregators.map((name, index) =>
+									h(
+										"div",
+										{
+											class: ["pvtAggregatorOption"],
+											key: `aggregator-${name}-${index}`,
 										},
-									},
-									this.sortIcons[this.propsData.rowOrder].rowSymbol
-								),
-								h(
-									"a",
-									{
-										class: ["pvtColOrder"],
-										title: __('Update the order of the columns'),
-										role: "button",
-										onClick: () => {
-											this.propUpdater("colOrder")(
-												this.sortIcons[this.propsData.colOrder].next
-											);
+										[
+											h(Dropdown, {
+												style: {
+													display: "inline-block",
+												},
+												values: this.availableAggregators,
+												value: name,
+												title: __('Select the aggregation method for the data'),
+												onInput: (value) => {
+													this.changeAggregator(index, value);
+												},
+											}),
+											this.selectedAggregators.length > 1
+												? h(
+														"a",
+														{
+															class: ["pvtAggregatorRemove"],
+															role: "button",
+															title: __('Remove aggregation'),
+															onClick: (event) => {
+																event?.preventDefault?.();
+																this.removeAggregator(index);
+															},
+														},
+														"×"
+												  )
+												: null,
+										]
+									)
+								)
+							),
+							this.selectedAggregators.length < this.availableAggregators.length
+								? h(
+										"a",
+										{
+											class: ["pvtAggregatorAdd"],
+											role: "button",
+											title: __('Add another aggregation'),
+											onClick: (event) => {
+												event?.preventDefault?.();
+												this.addAggregator();
+											},
 										},
-									},
-									this.sortIcons[this.propsData.colOrder].colSymbol
-								),
-							]),
+										"+"
+								  )
+								: null,
+							h(
+								"div",
+								{ class: ["pvtAggregatorOrders"] },
+								[
+									h(
+										"a",
+										{
+											class: ["pvtRowOrder"],
+											title: __('Update the order of the rows'),
+											role: "button",
+											onClick: (event) => {
+												event?.preventDefault?.();
+												this.propUpdater("rowOrder")(
+													this.sortIcons[this.propsData.rowOrder].next
+												);
+											},
+										},
+										this.sortIcons[this.propsData.rowOrder].rowSymbol
+									),
+									h(
+										"a",
+										{
+											class: ["pvtColOrder"],
+											title: __('Update the order of the columns'),
+											role: "button",
+											onClick: (event) => {
+												event?.preventDefault?.();
+												this.propUpdater("colOrder")(
+													this.sortIcons[this.propsData.colOrder].next
+												);
+											},
+										},
+										this.sortIcons[this.propsData.colOrder].colSymbol
+									),
+								]
+							),
 							this.numValsAllowed > 0
 								? new Array(this.numValsAllowed).fill().map((n, i) => [
 										h(Dropdown, {
@@ -366,7 +617,13 @@ export default {
 	render() {
 		if (this.data.length < 1) return;
 		const rendererName = this.propsData.rendererName || this.rendererName;
-		const aggregatorName = this.propsData.aggregatorName || this.aggregatorName;
+		const aggregatorName =
+			this.selectedAggregators[0] ||
+			(this.propsData.aggregatorName && typeof this.propsData.aggregatorName === "string"
+				? this.propsData.aggregatorName
+				: null) ||
+			(Array.isArray(this.aggregatorName) ? this.aggregatorName[0] : this.aggregatorName);
+		const aggregatorNames = this.selectedAggregators;
 		const vals = this.propsData.vals;
 		const unusedAttrsCell = this.makeDnDCell(
 			this.unusedAttrs,
@@ -441,6 +698,7 @@ export default {
 			cols: this.propsData.cols,
 			rendererName,
 			aggregatorName,
+			aggregatorNames,
 			vals,
 		};
 

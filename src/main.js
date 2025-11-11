@@ -150,7 +150,7 @@ createApp(PivottableUi, {
 	rows: ["Department"],
 	cols: ["Quarter"],
 	vals: ["Amount"],
-	aggregatorName: "Sum",
+	aggregatorNames: ["Sum", "Average"],
 	rendererName: "Table",
 	rowTotal: true,
 	colTotal: true,

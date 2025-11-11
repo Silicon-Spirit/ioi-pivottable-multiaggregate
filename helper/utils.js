@@ -537,15 +537,44 @@ Data Model class
 class PivotData {
 	constructor(inputProps = {}) {
 		this.props = Object.assign({}, PivotData.defaultProps, inputProps);
-		this.aggregator = this.props.aggregators[this.props.aggregatorName](
-			this.props.vals
-		);
+		this.aggregatorNames = this.resolveAggregatorNames();
+		this.aggregatorFactories = this.aggregatorNames
+			.map((name) => {
+				const generator = this.props.aggregators[name];
+				if (typeof generator !== "function") {
+					return null;
+				}
+				const factory = generator(this.props.vals);
+				if (typeof factory !== "function") {
+					return null;
+				}
+				return { name, factory };
+			})
+			.filter(Boolean);
+
+		if (!this.aggregatorFactories.length) {
+			const fallbackName = Object.keys(this.props.aggregators)[0];
+			if (fallbackName) {
+				const fallbackFactory = this.props.aggregators[fallbackName](this.props.vals);
+				this.aggregatorFactories.push({
+					name: fallbackName,
+					factory: fallbackFactory,
+				});
+				this.aggregatorNames = [fallbackName];
+			}
+		}
+		this.aggregatorNames = this.aggregatorFactories.map((entry) => entry.name);
+
+		this.primaryAggregatorName = this.aggregatorNames[0] || null;
+		this.aggregator =
+			this.aggregatorFactories[0]?.factory ||
+			(() => PivotData.makeEmptyAggregator());
 		this.tree = {};
 		this.rowKeys = [];
 		this.colKeys = [];
 		this.rowTotals = {};
 		this.colTotals = {};
-		this.allTotal = this.aggregator(this, [], []);
+		this.allTotal = this.createAggregatorCollection([], []);
 		this.sorted = false;
 		// iterate through input, accumulating data for cells
 		PivotData.forEachRecord(
@@ -557,6 +586,68 @@ class PivotData {
 				}
 			}
 		);
+	}
+
+	resolveAggregatorNames() {
+		let names = [];
+		if (Array.isArray(this.props.aggregatorNames) && this.props.aggregatorNames.length) {
+			names = this.props.aggregatorNames.slice();
+		} else if (Array.isArray(this.props.aggregatorName)) {
+			names = this.props.aggregatorName.slice();
+		} else if (typeof this.props.aggregatorName === "string" && this.props.aggregatorName) {
+			names = [this.props.aggregatorName];
+		}
+		if (!names.length) {
+			const defaultName = Object.keys(this.props.aggregators)[0];
+			if (defaultName) {
+				names = [defaultName];
+			}
+		}
+		return names.filter((name, index, arr) => arr.indexOf(name) === index);
+	}
+
+	createAggregatorCollection(rowKey, colKey) {
+		const collection = {};
+		for (const entry of this.aggregatorFactories) {
+			const { name, factory } = entry;
+			collection[name] = factory(this, rowKey, colKey);
+		}
+		if (!Object.keys(collection).length && this.primaryAggregatorName) {
+			collection[this.primaryAggregatorName] = PivotData.makeEmptyAggregator();
+		}
+		return collection;
+	}
+
+	static makeEmptyAggregator() {
+		return {
+			push() {},
+			value() {
+				return null;
+			},
+			format() {
+				return "";
+			},
+		};
+	}
+
+	createEmptyCollection() {
+		const empty = {};
+		for (const name of this.aggregatorNames) {
+			empty[name] = PivotData.makeEmptyAggregator();
+		}
+		return empty;
+	}
+
+	pushRecord(collection, record) {
+		if (!collection) {
+			return;
+		}
+		for (const name in collection) {
+			const aggregator = collection[name];
+			if (aggregator && typeof aggregator.push === "function") {
+				aggregator.push(record);
+			}
+		}
 	}
 
 	filter(record) {
@@ -611,7 +702,15 @@ class PivotData {
 	sortKeys() {
 		if (!this.sorted) {
 			this.sorted = true;
-			const v = (r, c) => this.getAggregator(r, c).value();
+			const primary = this.primaryAggregatorName || this.aggregatorNames[0] || null;
+			const v = (r, c) => {
+				const aggregator = primary
+					? this.getAggregator(r, c, primary)
+					: this.getAggregator(r, c);
+				return aggregator && typeof aggregator.value === "function"
+					? aggregator.value()
+					: null;
+			};
 			switch (this.props.rowOrder) {
 				case "value_a_to_z":
 					this.rowKeys.sort((a, b) => naturalSort(v(a, []), v(b, [])));
@@ -658,22 +757,22 @@ class PivotData {
 		const flatRowKey = rowKey.join(String.fromCharCode(0));
 		const flatColKey = colKey.join(String.fromCharCode(0));
 
-		this.allTotal.push(record);
+		this.pushRecord(this.allTotal, record);
 
 		if (rowKey.length !== 0) {
 			if (!this.rowTotals[flatRowKey]) {
 				this.rowKeys.push(rowKey);
-				this.rowTotals[flatRowKey] = this.aggregator(this, rowKey, []);
+				this.rowTotals[flatRowKey] = this.createAggregatorCollection(rowKey, []);
 			}
-			this.rowTotals[flatRowKey].push(record);
+			this.pushRecord(this.rowTotals[flatRowKey], record);
 		}
 
 		if (colKey.length !== 0) {
 			if (!this.colTotals[flatColKey]) {
 				this.colKeys.push(colKey);
-				this.colTotals[flatColKey] = this.aggregator(this, [], colKey);
+				this.colTotals[flatColKey] = this.createAggregatorCollection([], colKey);
 			}
-			this.colTotals[flatColKey].push(record);
+			this.pushRecord(this.colTotals[flatColKey], record);
 		}
 
 		if (colKey.length !== 0 && rowKey.length !== 0) {
@@ -681,39 +780,54 @@ class PivotData {
 				this.tree[flatRowKey] = {};
 			}
 			if (!this.tree[flatRowKey][flatColKey]) {
-				this.tree[flatRowKey][flatColKey] = this.aggregator(
-					this,
+				this.tree[flatRowKey][flatColKey] = this.createAggregatorCollection(
 					rowKey,
 					colKey
 				);
 			}
-			this.tree[flatRowKey][flatColKey].push(record);
+			this.pushRecord(this.tree[flatRowKey][flatColKey], record);
 		}
 	}
 
-	getAggregator(rowKey, colKey) {
-		let agg;
+	getAggregatorCollection(rowKey, colKey) {
+		let collection;
 		const flatRowKey = rowKey.join(String.fromCharCode(0));
 		const flatColKey = colKey.join(String.fromCharCode(0));
 		if (rowKey.length === 0 && colKey.length === 0) {
-			agg = this.allTotal;
+			collection = this.allTotal;
 		} else if (rowKey.length === 0) {
-			agg = this.colTotals[flatColKey];
+			collection = this.colTotals[flatColKey];
 		} else if (colKey.length === 0) {
-			agg = this.rowTotals[flatRowKey];
+			collection = this.rowTotals[flatRowKey];
 		} else {
-			agg = this.tree[flatRowKey][flatColKey];
+			collection =
+				this.tree[flatRowKey] && this.tree[flatRowKey][flatColKey]
+					? this.tree[flatRowKey][flatColKey]
+					: null;
 		}
-		return (
-			agg || {
-				value() {
-					return null;
-				},
-				format() {
-					return "";
-				},
-			}
-		);
+		if (!collection) {
+			return this.createEmptyCollection();
+		}
+		return collection;
+	}
+
+	getAggregator(rowKey, colKey, aggregatorName) {
+		const collection = this.getAggregatorCollection(rowKey, colKey);
+
+		if (typeof aggregatorName === "string") {
+			return collection[aggregatorName] || PivotData.makeEmptyAggregator();
+		}
+
+		if (this.aggregatorNames.length === 1) {
+			const name = this.aggregatorNames[0];
+			return collection[name] || PivotData.makeEmptyAggregator();
+		}
+
+		return collection;
+	}
+
+	getAggregatorNames() {
+		return this.aggregatorNames.slice();
 	}
 }
 
@@ -775,6 +889,7 @@ PivotData.defaultProps = {
 	rows: [],
 	vals: [],
 	aggregatorName: __("Count"),
+	aggregatorNames: [],
 	sorters: {},
 	valueFilter: {},
 	rowOrder: "key_a_to_z",
