@@ -1,0 +1,158 @@
+import { createApp } from "vue";
+import "../pivottable.css";
+import PivottableUi from "../PivottableUi.js";
+
+const salesDataset = [
+	{
+		Department: "Sales",
+		Region: "North",
+		Product: "Software",
+		Amount: 12500,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Sales",
+		Region: "North",
+		Product: "Hardware",
+		Amount: 9800,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Sales",
+		Region: "South",
+		Product: "Software",
+		Amount: 14200,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Sales",
+		Region: "South",
+		Product: "Hardware",
+		Amount: 7600,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Sales",
+		Region: "North",
+		Product: "Software",
+		Amount: 13250,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Sales",
+		Region: "North",
+		Product: "Hardware",
+		Amount: 10300,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Sales",
+		Region: "South",
+		Product: "Software",
+		Amount: 15800,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Sales",
+		Region: "South",
+		Product: "Hardware",
+		Amount: 8100,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Support",
+		Region: "North",
+		Product: "Software",
+		Amount: 6200,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Support",
+		Region: "North",
+		Product: "Hardware",
+		Amount: 5800,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Support",
+		Region: "South",
+		Product: "Software",
+		Amount: 6700,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Support",
+		Region: "South",
+		Product: "Hardware",
+		Amount: 5400,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Support",
+		Region: "North",
+		Product: "Software",
+		Amount: 6400,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Support",
+		Region: "North",
+		Product: "Hardware",
+		Amount: 6100,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Support",
+		Region: "South",
+		Product: "Software",
+		Amount: 6950,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Support",
+		Region: "South",
+		Product: "Hardware",
+		Amount: 5600,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Marketing",
+		Region: "North",
+		Product: "Advertising",
+		Amount: 8300,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Marketing",
+		Region: "South",
+		Product: "Advertising",
+		Amount: 7200,
+		Quarter: "Q1",
+	},
+	{
+		Department: "Marketing",
+		Region: "North",
+		Product: "Events",
+		Amount: 9100,
+		Quarter: "Q2",
+	},
+	{
+		Department: "Marketing",
+		Region: "South",
+		Product: "Events",
+		Amount: 8450,
+		Quarter: "Q2",
+	},
+];
+
+createApp(PivottableUi, {
+	data: salesDataset,
+	rows: ["Department"],
+	cols: ["Quarter"],
+	vals: ["Amount"],
+	aggregatorName: "Sum",
+	rendererName: "Table",
+	rowTotal: true,
+	colTotal: true,
+}).mount("#app");
+
