@@ -1,6 +1,7 @@
-import { PivotData } from "./helper/utils";
-import defaultProps from "./helper/defaultProps";
-import * as Vue from "vue";
+import { PivotData } from "../utils/utils.js";
+import defaultProps from "../utils/defaultProps.js";
+import { h } from "vue";
+import * as XLSX from "xlsx";
 
 function redColorScaleGenerator(values) {
 	const min = Math.min.apply(Math, values);
@@ -27,7 +28,22 @@ function makeRenderer(opts = {}) {
 					return {};
 				},
 			},
-			...defaultProps.props,
+		...defaultProps.props,
+	},
+	data() {
+		return {
+			chartInstance: null
+		};
+	},
+	mounted() {
+			if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
+				this.renderChart();
+			}
+		},
+		updated() {
+			if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
+				this.renderChart();
+			}
 		},
 		methods: {
 			spanSize(arr, i, j) {
@@ -70,21 +86,31 @@ function makeRenderer(opts = {}) {
 				return len;
 			},
 			renderChart() {
+				if (!this.$refs.chartContainer) {
+					return;
+				}
 
 				const pivotData = new PivotData(this.$props);
 
 				const buildChartElement = (data) => {
 					const chartHeight = (window.innerHeight / 100) * 60;
 
+					// Clear previous chart if exists
+					if (this.chartInstance) {
+						this.chartInstance.destroy?.();
+					}
+
 					setTimeout(() => {
-						return new frappe.Chart(this.$refs.chartContainer, {
-							data: data,
-							type: opts.chartType,
-							height: chartHeight,
-							lineOptions: opts.lineOptions,
-							colors: ['#7ad6ff', '#7a94ff', '#d7d0ff', '#ff7b92', '#ffad70', '#fff48d', '#7ef8b3', '#c1ff7a', '#d7b3ff', '#ff7bff', '#b1b1b1', '#8d8d8d']
-						});
-					}, 100)
+						if (this.$refs.chartContainer && window.frappe && window.frappe.Chart) {
+							this.chartInstance = new frappe.Chart(this.$refs.chartContainer, {
+								data: data,
+								type: opts.chartType,
+								height: chartHeight,
+								lineOptions: opts.lineOptions,
+								colors: ['#7ad6ff', '#7a94ff', '#d7d0ff', '#ff7b92', '#ffad70', '#fff48d', '#7ef8b3', '#c1ff7a', '#d7b3ff', '#ff7bff', '#b1b1b1', '#8d8d8d']
+							});
+						}
+					}, 100);
 				}
 
 				if (Object.keys(pivotData.tree).length) {
@@ -235,28 +261,28 @@ function makeRenderer(opts = {}) {
 						}
 						: null;
 
-				return Vue.h(
+				return h(
 					"table",
 					{
 						class: ["pvtTable"],
 					},
 					[
-						Vue.h("thead", [
+						h("thead", [
 							colAttrs.map((c, j) => {
-								return Vue.h(
+								return h(
 									"tr",
 									{
 										key: `colAttrs${j}`,
 									},
 									[
 										j === 0 && rowAttrs.length !== 0
-											? Vue.h("th", {
+											? h("th", {
 												colSpan: rowAttrs.length,
 												rowSpan: colAttrs.length,
 											})
 											: undefined,
 
-										Vue.h(
+										h(
 											"th",
 											{
 												class: ["pvtAxisLabel"],
@@ -269,7 +295,7 @@ function makeRenderer(opts = {}) {
 											if (x === -1) {
 												return null;
 											}
-											return Vue.h(
+											return h(
 												"th",
 												{
 													class: ["pvtColLabel"],
@@ -284,7 +310,7 @@ function makeRenderer(opts = {}) {
 											);
 										}),
 										j === 0 && this.rowTotal
-											? Vue.h(
+											? h(
 												"th",
 												{
 													class: ["pvtTotalLabel"],
@@ -299,9 +325,9 @@ function makeRenderer(opts = {}) {
 							}),
 
 							rowAttrs.length !== 0
-								? Vue.h("tr", [
+								? h("tr", [
 									rowAttrs.map((r, i) => {
-										return Vue.h(
+										return h(
 											"th",
 											{
 												class: ["pvtAxisLabel"],
@@ -312,22 +338,22 @@ function makeRenderer(opts = {}) {
 									}),
 
 									this.rowTotal
-										? Vue.h(
+										? h(
 											"th",
 											{ class: ["pvtTotalLabel"] },
 											colAttrs.length === 0 ? "Totals" : null
 										)
 										: colAttrs.length === 0
 											? undefined
-											: Vue.h("th", { class: ["pvtTotalLabel"] }, null),
+											: h("th", { class: ["pvtTotalLabel"] }, null),
 								])
 								: undefined,
 						]),
 
-						Vue.h("tbody", null, [
+						h("tbody", null, [
 							rowKeys.map((rowKey, i) => {
 								const totalAggregator = pivotData.getAggregator(rowKey, []);
-								return Vue.h(
+								return h(
 									"tr",
 									{
 										key: `rowKeyRow${i}`,
@@ -338,7 +364,7 @@ function makeRenderer(opts = {}) {
 											if (x === -1) {
 												return null;
 											}
-											return Vue.h(
+											return h(
 												"th",
 												{
 													class: ["pvtRowLabel"],
@@ -355,7 +381,7 @@ function makeRenderer(opts = {}) {
 
 										colKeys.map((colKey, j) => {
 											const aggregator = pivotData.getAggregator(rowKey, colKey);
-											return Vue.h(
+											return h(
 												"td",
 												Object.assign(
 													{
@@ -382,7 +408,7 @@ function makeRenderer(opts = {}) {
 										}),
 
 										this.rowTotal
-											? Vue.h(
+											? h(
 												"td",
 												Object.assign(
 													{
@@ -406,9 +432,9 @@ function makeRenderer(opts = {}) {
 								);
 							}),
 
-							Vue.h("tr", [
+							h("tr", [
 								this.colTotal
-									? Vue.h(
+									? h(
 										"th",
 										{
 											class: ["pvtTotalLabel"],
@@ -422,7 +448,7 @@ function makeRenderer(opts = {}) {
 								this.colTotal
 									? colKeys.map((colKey, i) => {
 										const totalAggregator = pivotData.getAggregator([], colKey);
-										return Vue.h(
+										return h(
 											"td",
 											Object.assign(
 												{
@@ -446,7 +472,7 @@ function makeRenderer(opts = {}) {
 									: undefined,
 
 								this.colTotal && this.rowTotal
-									? Vue.h(
+									? h(
 										"td",
 										Object.assign(
 											{
@@ -471,10 +497,9 @@ function makeRenderer(opts = {}) {
 				)
 			} else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
 
-				return Vue.h('div', {
+				return h('div', {
 					ref: 'chartContainer',
-					id: 'pivot_chart',
-					innerHTML: this.renderChart()
+					id: 'pivot_chart'
 				});
 			}
 		}
@@ -501,7 +526,10 @@ const XLSXExportRenderer = {
 
 			worksheet["!cols"] = columnWidths;
 
-			XLSX.writeFile(workbook, !!cur_list.doctype ? `${cur_list.doctype.toLowerCase().replaceAll(' ', '_')}_pivot_export.xlsx` : "pivot_data_export.xlsx", {cellStyles: true});
+			const filename = (typeof cur_list !== 'undefined' && cur_list && cur_list.doctype) 
+				? `${cur_list.doctype.toLowerCase().replaceAll(' ', '_')}_pivot_export.xlsx` 
+				: "pivot_data_export.xlsx";
+			XLSX.writeFile(workbook, filename, {cellStyles: true});
 		},
 	},
 	render() {
@@ -553,14 +581,14 @@ const XLSXExportRenderer = {
 
 		console.log(format_data);
 
-		return Vue.h("div", {
+		return h("div", {
 			class: "d-flex justify-content-center align-items-center",
 			style: {
 				width: "100%",
 				height: "60vh",
 			},
 		}, [
-			Vue.h("button", {
+			h("button", {
 				class: "btn btn-default btn-sm ellipsis mb-3",
 				onClick: () => this.exportToXLSX(format_data),
 			}, __("Export to XLSX"))
@@ -625,5 +653,8 @@ const translated_renderers = {};
 Object.keys(renderers).forEach((key) => {
 	translated_renderers[__(key)] = renderers[key];
 });
+
+// Export makeRenderer for custom renderers
+export { makeRenderer };
 
 export default translated_renderers;

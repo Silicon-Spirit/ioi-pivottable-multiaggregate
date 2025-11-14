@@ -1,3 +1,14 @@
+// Helper function to get translation function
+const getTranslation = () => {
+	if (typeof window !== 'undefined' && window.__) {
+		return window.__;
+	}
+	// Fallback if __ is not available
+	return (text) => text;
+};
+
+const __ = getTranslation();
+
 export default {
 	props: {
 		data: {

@@ -1,12 +1,12 @@
-import common from "./helper/defaultProps";
-import DraggableAttribute from "./DraggableAttribute";
-import Dropdown from "./Dropdown";
-import Pivottable from "./Pivottable";
-import { PivotData, getSort, aggregators, sortAs } from "./helper/utils";
+import common from "../utils/defaultProps.js";
+import DraggableAttribute from "./DraggableAttribute.js";
+import Dropdown from "./Dropdown.js";
+import Pivottable from "./Pivottable.js";
+import { PivotData, getSort, aggregators, sortAs } from "../utils/utils.js";
 import draggable from "vuedraggable";
-import TableRenderer from "./TableRenderer";
-import * as Vue from "vue";
-import "./pivottable.css";
+import TableRenderer from "./TableRenderer.js";
+import { h } from "vue";
+import "../styles/pivottable.css";
 
 export default {
 	name: "vue-pivottable-ui",
@@ -128,8 +128,9 @@ export default {
 			},
 		};
 	},
-	beforeUpdated(nextProps) {
-		this.materializeInput(nextProps.data);
+	beforeUpdate() {
+		// Vue 3 lifecycle hook - no parameters
+		// Data changes are handled by watch
 	},
 	created() {
 		this.materializeInput(this.data);
@@ -169,7 +170,9 @@ export default {
 		},
 		updateValueFilter({ attribute, valueFilter }) {
 			this.propsData.valueFilter[attribute] = { ...valueFilter };
-			cur_list.pivot_value_filter = this.propsData.valueFilter
+			if (typeof cur_list !== 'undefined' && cur_list) {
+				cur_list.pivot_value_filter = this.propsData.valueFilter;
+			}
 		},
 		moveFilterBoxToTop({ attribute }) {
 			this.maxZIndex += 1;
@@ -215,7 +218,7 @@ export default {
 			this.materializedInput = materializedInput;
 			this.attrValues = attrValues;
 		},
-		makeDnDCell(items, onChange, classes, h) {
+		makeDnDCell(items, onChange, classes) {
 			return h(
 				draggable,
 				{
@@ -253,7 +256,7 @@ export default {
 				}
 			);
 		},
-		rendererCell(rendererName, h) {
+		rendererCell(rendererName) {
 			return this.$slots.rendererCell
 				? h(
 						"td",
@@ -279,7 +282,7 @@ export default {
 						]
 					);
 		},
-		aggregatorCell(aggregatorName, vals, h) {
+		aggregatorCell(aggregatorName, vals) {
 			return this.$slots.aggregatorCell
 				? h(
 						"td",
@@ -353,7 +356,7 @@ export default {
 						]
 					);
 		},
-		outputCell(props, h) {
+		outputCell(props) {
 			return h(
 				"td",
 				{
@@ -387,7 +390,7 @@ export default {
 				}
 			},
 			`pvtAxisContainer pvtUnused pvtHorizList`,
-			Vue.h
+			h
 		);
 		const colAttrsCell = this.makeDnDCell(
 			this.colAttrs,
@@ -408,7 +411,7 @@ export default {
 				}
 			},
 			"pvtAxisContainer pvtHorizList pvtCols",
-			Vue.h
+			h
 		);
 		const rowAttrsCell = this.makeDnDCell(
 			this.rowAttrs,
@@ -429,7 +432,7 @@ export default {
 				}
 			},
 			"pvtAxisContainer pvtVertList pvtRows",
-			Vue.h
+			h
 		);
 		const props = {
 			...this.$props,
@@ -444,20 +447,20 @@ export default {
 			vals,
 		};
 
-		const rendererCell = this.rendererCell(rendererName, Vue.h);
-		const aggregatorCell = this.aggregatorCell(aggregatorName, vals, Vue.h);
-		const outputCell = this.outputCell(props, Vue.h);
+		const rendererCell = this.rendererCell(rendererName);
+		const aggregatorCell = this.aggregatorCell(aggregatorName, vals);
+		const outputCell = this.outputCell(props);
 
-		return Vue.h(
+		return h(
 			"table",
 			{
 				class: ["pvtUi"],
 			},
 			[
-				Vue.h("tbody", [
-					Vue.h("tr", [rendererCell, unusedAttrsCell]),
-					Vue.h("tr", [aggregatorCell, colAttrsCell]),
-					Vue.h("tr", [rowAttrsCell, outputCell]),
+				h("tbody", [
+					h("tr", [rendererCell, unusedAttrsCell]),
+					h("tr", [aggregatorCell, colAttrsCell]),
+					h("tr", [rowAttrsCell, outputCell]),
 				]),
 			]
 		);
