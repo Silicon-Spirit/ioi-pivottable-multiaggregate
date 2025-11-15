@@ -200,6 +200,7 @@ const aggregatorTemplates = {
 						return this.count;
 					},
 					format: formatter,
+					numInputs: 0,  // ✅ Add this: Count doesn't need any value fields
 				};
 			};
 	},
