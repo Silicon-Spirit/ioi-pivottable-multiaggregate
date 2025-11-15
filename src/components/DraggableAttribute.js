@@ -140,6 +140,8 @@ export default {
 								h("input", {
 									class: ["pvtSearch"],
 									type: "text",
+									name: `pvt-search-${this.name}`,
+									id: `pvt-search-${this.name}`,
 									placeholder: __("Type to filter..."),
 									value: this.filterText,
 									onInput: (e) => {
@@ -214,6 +216,8 @@ export default {
 										[
 											h("input", {
 												type: "checkbox",
+												name: `pvt-checkbox-${this.name}-${x}`,
+												id: `pvt-checkbox-${this.name}-${x}`,
 												checked: checked,
 											}),
 											x,
