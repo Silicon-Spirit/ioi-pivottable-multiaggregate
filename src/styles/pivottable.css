@@ -1,0 +1,594 @@
+* {
+	box-sizing: border-box;
+}
+
+.pvtUi {
+	table-layout: fixed;
+	width: 100%;
+	color: #2a3f5f;
+	border-collapse: collapse;
+	background: #fff;
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.pvtUi select {
+	user-select: none;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-khtml-user-select: none;
+	-ms-user-select: none;
+	border-radius: 4px;
+}
+
+.pvtUi td {
+	overflow-x: auto;
+}
+
+.pvtUi td.pvtOutput {
+	padding: 0;
+	vertical-align: top;
+	border: 1px solid #e0e0e0;
+	overflow-x: auto;
+}
+
+/* Filter bar styling - light blue background */
+.pvtUnused {
+	background: #e3f2fd !important;
+	border: none !important;
+	padding: 8px 12px !important;
+	min-height: 48px !important;
+}
+
+.pvtUnused .pvtAxisContainer {
+	background: transparent;
+	border: none;
+	padding: 0;
+}
+
+.pvtUnused li {
+	padding: 6px 10px;
+	margin: 2px 4px;
+	display: inline-block;
+}
+
+.pvtUnused li span.pvtAttr {
+	background: #fff;
+	border: 1px solid #90caf9;
+	border-radius: 16px;
+	padding: 6px 12px;
+	font-size: 13px;
+	color: #1976d2;
+	box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+	transition: all 0.2s;
+}
+
+.pvtUnused li span.pvtAttr:hover {
+	background: #f5f5f5;
+	border-color: #64b5f6;
+	box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.pvtUnused li span.pvtAttr.sortonly {
+	border-color: #90caf9;
+	background: #f5f5f5;
+}
+
+.pvtUnused li span.pvtAttr.disabled {
+	border-color: #e0e0e0;
+	color: #bdbdbd;
+	background: #fafafa;
+}
+
+/* Main pivot table */
+table.pvtTable {
+	font-size: 8pt;
+	text-align: left;
+	border-collapse: collapse;
+	border: 1px solid #c8d4e3;
+}
+
+table.pvtTable thead tr th,
+table.pvtTable tbody tr th {
+	background-color: #ebf0f8;
+	border: 1px solid #c8d4e3;
+	font-size: 8pt;
+	padding: 5px;
+}
+
+table.pvtTable .pvtColLabel {
+	text-align: center;
+}
+
+table.pvtTable .pvtTotalLabel {
+	text-align: right;
+}
+
+table.pvtTable tbody tr td {
+	color: #2a3f5f;
+	padding: 3px;
+	background-color: #fff;
+	border: 1px solid #c8d4e3;
+	vertical-align: top;
+	text-align: right;
+}
+
+.pvtTotal,
+.pvtGrandTotal {
+	font-weight: bold;
+}
+
+/* Sort controls */
+.pvtRowOrder,
+.pvtColOrder {
+	cursor: pointer;
+	width: 28px;
+	height: 28px;
+	margin-left: 8px;
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	user-select: none;
+	text-decoration: none !important;
+	color: #424242;
+	font-size: 16px;
+	font-weight: 600;
+	border-radius: 4px;
+	transition: all 0.2s;
+	background: #f5f5f5;
+	border: 1px solid #e0e0e0;
+	vertical-align: middle;
+	line-height: 1;
+	min-width: 28px;
+	visibility: visible !important;
+	opacity: 1 !important;
+}
+
+.pvtRowOrder:hover,
+.pvtColOrder:hover {
+	background: #e0e0e0;
+	color: #212121;
+	border-color: #bdbdbd;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.pvtRowOrder:active,
+.pvtColOrder:active {
+	background: #d5d5d5;
+	transform: scale(0.95);
+}
+
+/* Control areas */
+.pvtAxisContainer,
+.pvtVals {
+	background: #fff;
+	padding: 8px;
+	min-width: 20px;
+	min-height: 20px;
+	border-top-right-radius: 4px;
+}
+
+.pvtVals {
+	border: 1px solid #e0e0e0 !important;
+}
+
+.pvtVals.pvtText {
+	vertical-align: middle;
+	font-size: 14px;
+	font-weight: 500;
+	color: #424242;
+	user-select: none;
+	padding: 8px 12px;
+	text-align: start;
+}
+
+/* Ensure the div containing order buttons displays properly */
+.pvtVals > div {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.pvtRenderers {
+	border-top-left-radius: 8px !important;
+	user-select: none;
+	width: 200px;
+	background: #e3f2fd ;
+}
+
+.pvtRenderers,
+.pvtvals,
+.pvtVertList {
+	width: 310px !important;
+}
+
+@media screen and (max-width:576px) {
+	.pvtRenderers {
+		width: 100%;
+	}
+
+	.pvtAxisContainer {
+		display: none;
+	}
+
+	.pvtTable {
+		margin: auto;
+	}
+}
+
+/* Dropdowns - modern styling */
+.pvtDropdown {
+	border: 1px solid #e0e0e0;
+	align-items: center;
+	display: block;
+	background-color: #fff;
+	background-image: none;
+	border-radius: 4px;
+	padding: 1px 2px;
+	height: 32px;
+	font-size: 14px;
+	font-weight: 500;
+	outline: none;
+	line-height: 1.5;
+	user-select: none;
+	cursor: pointer;
+	transition: all 0.2s;
+	color: #424242;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-khtml-user-select: none;
+	-ms-user-select: none;
+	width: 205px !important;
+	margin: auto !important;
+}
+
+.pvtDropdown:hover {
+	border-color: #bdbdbd;
+	background-color: #fafafa;
+}
+
+.pvtDropdown:focus {
+	border-color: #2196f3;
+	box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.pvtRenderers .pvtDropdown {
+	padding: 1px 3px;
+	border: 1px solid #e0e0e0;
+	width: 100%;
+	margin: 0;
+	background: #fff;
+}
+
+.pvtDropdown:last-child {
+	margin-bottom: 0px;
+}
+
+.pvtVals {
+	white-space: nowrap;
+	vertical-align: top;
+	padding: 8px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+}
+
+.pvtRows {
+	height: auto;
+	min-height: 40px;
+}
+
+.pvtAxisContainer li {
+	padding: 6px 8px;
+	list-style-type: none;
+	cursor: grab;
+}
+
+.pvtAxisContainer li:active {
+	cursor: grabbing;
+}
+
+.pvtAxisContainer li.pvtPlaceholder {
+	border-radius: 4px;
+	padding: 8px 12px;
+	border: 2px dashed #bdbdbd;
+	background: #fafafa;
+}
+
+.pvtAxisContainer li.pvtPlaceholder span.pvtAttr {
+	display: none;
+}
+
+.pvtAxisContainer li span.pvtAttr {
+	background: #fff;
+	border: 1px solid #e0e0e0;
+	padding: 6px 12px;
+	white-space: nowrap;
+	border-radius: 4px;
+	user-select: none;
+	font-size: 13px;
+	color: #424242;
+	display: inline-block;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-khtml-user-select: none;
+	-ms-user-select: none;
+	transition: all 0.2s;
+}
+
+.pvtAxisContainer li span.pvtAttr:hover {
+	background: #f5f5f5;
+	border-color: #bdbdbd;
+}
+
+.pvtAxisContainer li span.pvtAttr.sortonly {
+	border: 1px solid #e0e0e0;
+	background: #fafafa;
+}
+
+.pvtAxisContainer li span.pvtAttr.disabled {
+	border: 1px solid #e0e0e0;
+	color: #bdbdbd;
+	cursor: not-allowed;
+	background: #fafafa;
+}
+
+.pvtTriangle {
+	cursor: pointer;
+	color: #616161;
+	margin-left: 6px;
+	display: inline-flex;
+	align-items: center;
+	transition: color 0.2s;
+}
+
+.pvtTriangle:hover {
+	color: #424242;
+}
+
+.pvtHorizList li {
+	display: inline-block;
+	vertical-align: middle;
+}
+
+.pvtVertList {
+	vertical-align: top;
+	height: 500px !important;
+}
+
+.pvtVertList li {
+	display: block;
+	margin: 2px 0;
+}
+
+.pvtFilteredAttribute {
+	font-style: italic;
+	position: relative;
+}
+
+.pvtFilteredAttribute::after {
+	content: "●";
+	color: #2196f3;
+	margin-left: 4px;
+	font-size: 8px;
+	vertical-align: super;
+}
+
+.sortable-chosen .pvtFilterBox {
+	display: none !important;
+}
+
+.pvtFilterTextClear {
+	position: absolute;
+	right: 8px;
+	top: 50%;
+	transform: translateY(-50%);
+	font-size: 18px;
+	cursor: pointer;
+	text-decoration: none !important;
+	color: #9e9e9e;
+	width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	transition: all 0.2s;
+}
+
+.pvtFilterTextClear:hover {
+	background: #f5f5f5;
+	color: #616161;
+}
+
+.pvtButtonContainer {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	padding: 8px 0;
+}
+
+.pvtButton {
+	display: inline-block;
+	color: #424242;
+	border-radius: 4px;
+	padding: 6px 12px;
+	background: #fff;
+	border: 1px solid #e0e0e0;
+	font-size: 13px;
+	margin: 0;
+	transition: all 0.2s;
+	text-decoration: none !important;
+	cursor: pointer;
+	font-weight: 500;
+}
+
+.pvtButton:hover {
+	background: #f5f5f5;
+	border-color: #bdbdbd;
+	color: #212121;
+}
+
+.pvtButton:active {
+	background: #eeeeee;
+}
+
+.pvtSearchContainer {
+	position: relative;
+	padding: 8px;
+	background: #fafafa;
+	border-radius: 4px;
+	margin-bottom: 8px;
+}
+
+.pvtFilterBox input {
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+	color: #424242;
+	padding: 8px 32px 8px 12px;
+	font-size: 13px;
+	width: 100%;
+	background: #fff;
+	transition: all 0.2s;
+}
+
+.pvtFilterBox input:focus {
+	border-color: #2196f3;
+	outline: none;
+	box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.pvtFilterBox {
+	z-index: 1000 !important;
+	border: 1px solid #e0e0e0;
+	max-width: 400px;
+	min-width: 250px;
+	background-color: #fff;
+	position: fixed;
+	padding: 12px;
+	user-select: none;
+	min-height: 120px;
+	box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+	border-radius: 8px;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-khtml-user-select: none;
+	-ms-user-select: none;
+}
+
+.pvtFilterBox input[type='text'] {
+	display: block;
+	width: 100%;
+	color: #424242;
+	margin-bottom: 8px;
+	padding: 8px 32px 8px 12px;
+}
+
+.pvtCheckContainer {
+	text-align: left;
+	font-size: 13px;
+	white-space: nowrap;
+	overflow-y: auto;
+	width: 100%;
+	max-height: 300px;
+	border-top: 1px solid #e0e0e0;
+	margin-top: 8px;
+	padding-top: 8px;
+}
+
+.pvtCheckContainer p {
+	margin: 0;
+	margin-bottom: 2px;
+	padding: 8px 12px;
+	cursor: pointer;
+	border-radius: 4px;
+	transition: background 0.2s;
+}
+
+.pvtCheckContainer p:hover {
+	background: #f5f5f5;
+}
+
+.pvtCheckContainer p.selected {
+	background: #e3f2fd;
+	color: #1976d2;
+	font-weight: 500;
+	min-width: 100%;
+	width: max-content;
+}
+
+.pvtCheckContainer p input[type='checkbox'] {
+	width: 16px !important;
+	margin-right: 8px;
+	cursor: pointer;
+}
+
+.pvtOnly {
+	display: none;
+	width: 20px;
+	float: right;
+	font-size: 12px;
+	padding-left: 5px;
+	cursor: pointer;
+	color: #2196f3;
+	font-weight: 600;
+}
+
+.pvtOnlySpacer {
+	display: block;
+	width: 35px;
+	float: right;
+}
+
+.pvtCheckContainer p:hover .pvtOnly {
+	display: block;
+}
+
+.pvtCheckContainer p:hover .pvtOnlySpacer {
+	display: none;
+}
+
+.pvtRendererArea {
+	padding: 8px;
+}
+
+/* Column and Row containers */
+.pvtCols {
+	background: #fafafa;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+}
+
+.pvtRows {
+	background: #fafafa;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+}
+
+/* Value cells styling */
+.pvVal {
+	text-align: right;
+	font-weight: 400;
+}
+
+/* Responsive adjustments */
+/* @media (max-width: 768px) {
+	.pvtUi {
+		font-size: 12px;
+	}
+	
+	table.pvtTable {
+		font-size: 12px;
+	}
+	
+	table.pvtTable thead tr th,
+	table.pvtTable tbody tr th,
+	table.pvtTable tbody tr td {
+		padding: 6px 8px;
+	}
+} */

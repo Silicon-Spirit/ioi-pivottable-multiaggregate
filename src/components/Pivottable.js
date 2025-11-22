@@ -1,6 +1,6 @@
-import TableRenderer from "./TableRenderer";
-import defaultProps from "./helper/defaultProps";
-import * as Vue from "vue";
+import TableRenderer from "./TableRenderer.js";
+import defaultProps from "../utils/defaultProps.js";
+import { h } from "vue";
 export default {
 	name: "vue-pivottable",
 	props: defaultProps.props,
@@ -14,6 +14,6 @@ export default {
 		},
 	},
 	render() {
-		return Vue.h(this.renderers, { ...this.$props });
+		return h(this.renderers, { ...this.$props });
 	},
 };

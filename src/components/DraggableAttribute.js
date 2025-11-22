@@ -1,4 +1,4 @@
-import * as Vue from "vue";
+import { h } from "vue";
 
 export default {
 	name: "draggable-attribute",
@@ -117,7 +117,7 @@ export default {
 			const shown = values
 				.filter(this.matchesFilter.bind(this))
 				.sort(this.sorter);
-			return Vue.h(
+			return h(
 				"div",
 				{
 					class: ["pvtFilterBox"],
@@ -129,17 +129,19 @@ export default {
 					onClick: () => this.moveFilterBoxToTop(this.name),
 				},
 				[
-					Vue.h(
+					h(
 						"div",
 						{
 							class: "pvtSearchContainer",
 						},
 						[
-							showMenu || Vue.h("p", "too many values to show"),
+							showMenu || h("p", "too many values to show"),
 							showMenu &&
-								Vue.h("input", {
+								h("input", {
 									class: ["pvtSearch"],
 									type: "text",
+									name: `pvt-search-${this.name}`,
+									id: `pvt-search-${this.name}`,
 									placeholder: __("Type to filter..."),
 									value: this.filterText,
 									onInput: (e) => {
@@ -147,19 +149,19 @@ export default {
 										this.$emit("input", e.target.value);
 									},
 								}),
-							Vue.h("a", {
+							h("a", {
 								class: ["pvtFilterTextClear"],
 								onclick: () => {
 									this.filterText = "";
 								},
 							}),
-							Vue.h(
+							h(
 								"div",
 								{
 									class: ["pvtButtonContainer"],
 								},
 								[
-									Vue.h(
+									h(
 										"a",
 										{
 											class: ["pvtButton"],
@@ -174,7 +176,7 @@ export default {
 										},
 										__("Select {0}", [values.length === shown.length ? __("all") : shown.length])
 									),
-									Vue.h(
+									h(
 										"a",
 										{
 											class: ["pvtButton"],
@@ -194,7 +196,7 @@ export default {
 						]
 					),
 					showMenu &&
-						Vue.h(
+						h(
 							"div",
 							{
 								class: ["pvtCheckContainer"],
@@ -202,7 +204,7 @@ export default {
 							[
 								...shown.map((x) => {
 									const checked = !(x in this.valueFilter);
-									return Vue.h(
+									return h(
 										"p",
 										{
 											class: {
@@ -212,12 +214,14 @@ export default {
 											onClick: () => this.toggleValue(x),
 										},
 										[
-											Vue.h("input", {
+											h("input", {
 												type: "checkbox",
+												name: `pvt-checkbox-${this.name}-${x}`,
+												id: `pvt-checkbox-${this.name}-${x}`,
 												checked: checked,
 											}),
 											x,
-											Vue.h(
+											h(
 												"a",
 												{
 													class: ["pvtOnly"],
@@ -225,7 +229,7 @@ export default {
 												},
 												"✔"
 											),
-											Vue.h("a", {
+											h("a", {
 												class: ["pvtOnlySpacer"],
 											}),
 										]
@@ -271,13 +275,13 @@ export default {
 		if (this.disabled) {
 			spanClass.push("disabled");
 		}
-		return Vue.h(
+		return h(
 			"li",
 			{
 				"data-id": !this.disabled ? this.name : undefined,
 			},
 			[
-				Vue.h(
+				h(
 					"span",
 					{
 						class: spanClass,
@@ -285,14 +289,14 @@ export default {
 					[
 						this.name,
 						!this.disabled
-							? Vue.h(
+							? h(
 									"span",
 									{
 										class: ["pvtTriangle"],
 										onClick: this.toggleFilterBox.bind(this),
 									},
 									[
-										Vue.h(
+										h(
 											"svg",
 											{
 												xmlns: "http://www.w3.org/2000/svg",
@@ -303,7 +307,7 @@ export default {
 												viewBox: "0 0 16 16"
 											},
 											[
-												Vue.h("path", {
+												h("path", {
 													d: "M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.128.334L10 8.692V13.5a.5.5 0 0 1-.342.474l-3 1A.5.5 0 0 1 6 14.5V8.692L1.628 3.834A.5.5 0 0 1 1.5 3.5zm1 .5v1.308l4.372 4.858A.5.5 0 0 1 7 8.5v5.306l2-.666V8.5a.5.5 0 0 1 .128-.334L13.5 3.308V2z",
 												}),
 											]

@@ -1,3 +1,19 @@
+// Helper function to get translation function
+const getTranslation = () => {
+	if (typeof window !== 'undefined' && window.__) {
+		return window.__;
+	}
+	// Fallback if __ is not available
+	return (text, args) => {
+		if (args && args.length) {
+			return text.replace(/\{(\d+)\}/g, (match, index) => args[parseInt(index)] || match);
+		}
+		return text;
+	};
+};
+
+const __ = getTranslation();
+
 const addSeparators = function (nStr, thousandsSep, decimalSep) {
 	const x = String(nStr).split(".");
 	let x1 = x[0];
@@ -184,6 +200,7 @@ const aggregatorTemplates = {
 						return this.count;
 					},
 					format: formatter,
+					numInputs: 0,  // ✅ Add this: Count doesn't need any value fields
 				};
 			};
 	},

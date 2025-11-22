@@ -1,14 +1,85 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Vue 3 PivotTable UI Demo</title>
-	</head>
-	<body>
-		<div id="app"></div>
-		<script type="module" src="/src/stubs.js"></script>
-		<script type="module" src="/src/main.js"></script>
-	</body>
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Vue3 PivotTable - Development</title>
+	<style>
+		body {
+			margin: 0;
+			padding: 0;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+			background: #fafafa;
+		}
+		#app {
+			background: white;
+			padding: 24px;
+			min-height: 100vh;
+		}
+		h1 {
+			margin-top: 0;
+			margin-bottom: 24px;
+			color: #212121;
+			font-size: 24px;
+			font-weight: 500;
+		}
+	</style>
+	<script>
+		// Set up Frappe mocks BEFORE any modules load
+		// This script runs in non-strict mode to allow global variable assignment
+		
+		// Translation function - make it a true global (not just window.__)
+		// In ES modules, we need to assign to window and also make it available globally
+		var __ = function(text, args) {
+			if (args && args.length) {
+				return text.replace(/\{(\d+)\}/g, function(match, index) {
+					return args[parseInt(index)] || match;
+				});
+			}
+			return text;
+		};
+		window.__ = __;
+		
+		// Number format functions
+		window.get_number_format = window.get_number_format || function() {
+			return 'standard';
+		};
+		window.get_number_format_info = window.get_number_format_info || function(format) {
+			return {
+				group_sep: ',',
+				decimal_str: '.',
+				precision: 2
+			};
+		};
+		
+		// Mock cur_list for development (used in some components)
+		if (typeof window.cur_list === 'undefined') {
+			window.cur_list = {
+				doctype: 'TestDocType',
+				pivot_value_filter: {}
+			};
+		}
+		
+		// Mock frappe object for charts
+		if (typeof window.frappe === 'undefined') {
+			window.frappe = {
+				Chart: function(container, options) {
+					console.log('Frappe Chart would be created here', { container: container, options: options });
+					// In development, you might want to use a chart library
+					// For now, just log it
+					this.destroy = function() {
+						// Cleanup
+					};
+				}
+			};
+		}
+	</script>
+</head>
+<body>
+	<div id="app"></div>
+	<script type="module" src="/src/stubs.js"></script>
+	<script type="module" src="/src/main.js"></script>
+	<script type="module" src="/src/dev/main.js"></script>
+</body>
 </html>
 
