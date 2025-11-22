@@ -65,10 +65,8 @@
 			window.frappe = {
 				Chart: function(container, options) {
 					console.log('Frappe Chart would be created here', { container: container, options: options });
-					// In development, you might want to use a chart library
-					// For now, just log it
 					this.destroy = function() {
-						// Cleanup
+
 					};
 				}
 			};
@@ -79,7 +77,6 @@
 	<div id="app"></div>
 	<script type="module" src="/src/stubs.js"></script>
 	<script type="module" src="/src/main.js"></script>
-	<script type="module" src="/src/dev/main.js"></script>
 </body>
 </html>
 

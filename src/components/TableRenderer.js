@@ -240,7 +240,10 @@ function makeRenderer(opts = {}) {
 					}
 				}
 				if (!aggregatorList.length) {
-					if (Array.isArray(this.aggregatorName)) {
+					// Check aggregatorNames prop first (plural)
+					if (Array.isArray(this.aggregatorNames) && this.aggregatorNames.length) {
+						aggregatorList = this.aggregatorNames.filter((name) => typeof name === "string" && name.length);
+					} else if (Array.isArray(this.aggregatorName)) {
 						aggregatorList = this.aggregatorName.filter((name) => typeof name === "string" && name.length);
 					} else if (typeof this.aggregatorName === "string" && this.aggregatorName) {
 						aggregatorList = [this.aggregatorName];
@@ -367,7 +370,7 @@ function makeRenderer(opts = {}) {
 					const rowCells = [];
 					if (rowAttrs.length) {
 						rowCells.push(
-							Vue.h(
+							h(
 								"th",
 								{
 									class: ["pvtTotalGroupLabel"],
@@ -380,7 +383,7 @@ function makeRenderer(opts = {}) {
 					if (rowAttrs.length) {
 						rowAttrs.forEach((r, i) => {
 							rowCells.push(
-								Vue.h(
+								h(
 									"th",
 									{
 										class: ["pvtAxisLabel"],
@@ -393,7 +396,7 @@ function makeRenderer(opts = {}) {
 					}
 					aggregatorList.forEach((aggName, aggIndex) => {
 						rowCells.push(
-							Vue.h(
+							h(
 								"th",
 								{
 									class: ["pvtColLabel"],
@@ -403,7 +406,7 @@ function makeRenderer(opts = {}) {
 							)
 						);
 					});
-					headerRows = [Vue.h("tr", rowCells)];
+					headerRows = [h("tr", rowCells)];
 				} else {
 					headerRows = headerColAttrs.map((attr, attrIndex) => {
 						const cells = [];
@@ -413,7 +416,7 @@ function makeRenderer(opts = {}) {
 							const rowSpan = headerColAttrs.length - 1;
 							if (rowSpan > 0) {
 								cells.push(
-									Vue.h("th", {
+									h("th", {
 										colSpan: rowAttrs.length,
 										rowSpan,
 									})
@@ -424,7 +427,7 @@ function makeRenderer(opts = {}) {
 						if (isLastHeaderRow && rowAttrs.length !== 0) {
 							rowAttrs.forEach((r, i) => {
 								cells.push(
-									Vue.h(
+									h(
 										"th",
 										{
 											class: ["pvtAxisLabel"],
@@ -437,7 +440,7 @@ function makeRenderer(opts = {}) {
 						}
 
 						cells.push(
-							Vue.h(
+							h(
 								"th",
 								{
 									class: ["pvtAxisLabel"],
@@ -452,7 +455,7 @@ function makeRenderer(opts = {}) {
 								return;
 							}
 							cells.push(
-								Vue.h(
+								h(
 									"th",
 									{
 										class: ["pvtColLabel"],
@@ -474,7 +477,7 @@ function makeRenderer(opts = {}) {
 							const remainingRows = headerColAttrs.length - 1;
 							if (remainingRows > 0) {
 								cells.push(
-									Vue.h(
+									h(
 										"th",
 										{
 											class: ["pvtTotalGroupLabel"],
@@ -491,7 +494,7 @@ function makeRenderer(opts = {}) {
 							if (aggregatorCount > 1) {
 							aggregatorList.forEach((aggName, aggIndex) => {
 								cells.push(
-									Vue.h(
+									h(
 										"th",
 										{
 											class: ["pvtColLabel"],
@@ -503,7 +506,7 @@ function makeRenderer(opts = {}) {
 							});
 							} else {
 								cells.push(
-									Vue.h(
+									h(
 										"th",
 										{
 											class: ["pvtColLabel"],
@@ -514,7 +517,7 @@ function makeRenderer(opts = {}) {
 							}
 						}
 
-						return Vue.h(
+						return h(
 							"tr",
 							{
 								key: `colAttrs${attrIndex}`,
@@ -533,7 +536,7 @@ function makeRenderer(opts = {}) {
 							return;
 						}
 						rowCells.push(
-							Vue.h(
+							h(
 								"th",
 								{
 									class: ["pvtRowLabel"],
@@ -561,7 +564,7 @@ function makeRenderer(opts = {}) {
 							cellClasses.push("pvtEmpty");
 						}
 						rowCells.push(
-							Vue.h(
+							h(
 								"td",
 								Object.assign(
 									{
@@ -593,7 +596,7 @@ function makeRenderer(opts = {}) {
 								totalClasses.push("pvtEmpty");
 							}
 							rowCells.push(
-								Vue.h(
+								h(
 									"td",
 									Object.assign(
 										{
@@ -613,7 +616,7 @@ function makeRenderer(opts = {}) {
 						});
 					}
 
-					return Vue.h(
+					return h(
 						"tr",
 						{
 							key: `rowKeyRow${rowIndex}`,
@@ -628,7 +631,7 @@ function makeRenderer(opts = {}) {
 
 				if (labelColSpan > 0 && headerColAttrs.length) {
 					totalCells.push(
-						Vue.h(
+						h(
 							"th",
 							{
 								class: ["pvtTotalLabel"],
@@ -651,7 +654,7 @@ function makeRenderer(opts = {}) {
 							columnClasses.push("pvtEmpty");
 						}
 						totalCells.push(
-							Vue.h(
+							h(
 								"td",
 								Object.assign(
 									{
@@ -683,7 +686,7 @@ function makeRenderer(opts = {}) {
 								grandClasses.push("pvtEmpty");
 							}
 							totalCells.push(
-								Vue.h(
+								h(
 									"td",
 									Object.assign(
 										{
@@ -702,16 +705,23 @@ function makeRenderer(opts = {}) {
 						});
 					}
 
-					bodyRows.push(Vue.h("tr", totalCells));
+					bodyRows.push(h("tr", totalCells));
 				}
 
-				return Vue.h(
+				return h(
 					"table",
 					{
 						class: ["pvtTable"],
 					},
-					[Vue.h("thead", headerRows), Vue.h("tbody", null, bodyRows)]
+					[h("thead", headerRows), h("tbody", null, bodyRows)]
 				);
+			}
+
+			else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
+				return h('div', {
+					ref: 'chartContainer',
+					id: 'pivot_chart'
+				});
 			}
 
 			if (false) { // legacy single-aggregator rendering retained for reference
@@ -925,7 +935,11 @@ function makeRenderer(opts = {}) {
 
 						h("tbody", null, [
 							rowKeys.map((rowKey, i) => {
-
+								const totalAggregator = pivotData.getAggregator(rowKey, []);
+								const totalValue = totalAggregator && typeof totalAggregator.value === "function"
+									? totalAggregator.value()
+									: null;
+								return h(
 									"tr",
 									{
 										key: `rowKeyRow${i}`,
@@ -952,7 +966,8 @@ function makeRenderer(opts = {}) {
 										}),
 
 										colKeys.map((colKey, j) => {
-
+											const aggregator = pivotData.getAggregator(rowKey, colKey);
+											return h(
 												"td",
 												Object.assign(
 													{
@@ -980,9 +995,9 @@ function makeRenderer(opts = {}) {
 														}
 														: {}
 												),
-												Array.isArray(aggregatorNames) && aggregatorNames.length > 1
-													? this.renderAggregatorContent(aggregator, aggregatorNames)
-													: aggregator.format(aggregator.value())
+												aggregator && typeof aggregator.format === "function"
+													? aggregator.format(aggregator.value())
+													: ""
 											);
 										}),
 
@@ -1006,9 +1021,9 @@ function makeRenderer(opts = {}) {
 														}
 														: {}
 												),
-												Array.isArray(aggregatorNames) && aggregatorNames.length > 1
-													? this.renderAggregatorContent(totalAggregator, aggregatorNames)
-													: totalAggregator.format(totalValue)
+												totalAggregator && typeof totalAggregator.format === "function"
+													? totalAggregator.format(totalValue)
+													: ""
 											)
 											: undefined,
 									]
@@ -1038,7 +1053,7 @@ function makeRenderer(opts = {}) {
 											aggregatorNames.length > 1
 												? getAggregatorValue([], colKey)
 												: totalAggregator.value();
-										return Vue.h(
+										return h(
 											"td",
 											Object.assign(
 												{
@@ -1058,9 +1073,9 @@ function makeRenderer(opts = {}) {
 													}
 													: {}
 											),
-											Array.isArray(aggregatorNames) && aggregatorNames.length > 1
-												? this.renderAggregatorContent(totalAggregator, aggregatorNames)
-												: totalAggregator.format(totalValue)
+											totalAggregator && typeof totalAggregator.format === "function"
+												? totalAggregator.format(totalValue)
+												: ""
 										);
 									})
 									: undefined,
@@ -1084,9 +1099,9 @@ function makeRenderer(opts = {}) {
 												}
 												: {}
 										),
-										Array.isArray(aggregatorNames) && aggregatorNames.length > 1
-											? this.renderAggregatorContent(grandTotalAggregator, aggregatorNames)
-											: grandTotalAggregator.format(grandTotalAggregator.value())
+										grandTotalAggregator && typeof grandTotalAggregator.format === "function"
+											? grandTotalAggregator.format(grandTotalAggregator.value())
+											: ""
 									)
 									: undefined,
 							]),
@@ -1094,15 +1109,8 @@ function makeRenderer(opts = {}) {
 					]
 				)
 			}
-
-			} else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
-
-				return h('div', {
-					ref: 'chartContainer',
-					id: 'pivot_chart'
-				});
-			}
 		}
+		},
 	};
 	return TableRenderer;
 }

@@ -1,6 +1,6 @@
 import { createApp } from "vue";
-import "../pivottable.css";
-import PivottableUi from "../PivottableUi.js";
+import "./styles/pivottable.css";
+import PivottableUi from "./components/PivottableUi.js";
 
 const salesDataset = [
 	{

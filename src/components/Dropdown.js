@@ -8,9 +8,14 @@ export default {
 		id: String,
 	},
 	emits: ["input"],
+	data() {
+		return {
+			generatedId: `pvt-dropdown-${Math.random().toString(36).substr(2, 9)}`
+		};
+	},
 	render() {
 		// Generate unique id/name if not provided
-		const uniqueId = this.id || `pvt-dropdown-${this._uid || Math.random().toString(36).substr(2, 9)}`;
+		const uniqueId = this.id || this.generatedId;
 		const uniqueName = this.name || uniqueId;
 		
 		return h(
