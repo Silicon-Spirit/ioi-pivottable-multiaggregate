@@ -328,46 +328,67 @@ function makeRenderer(opts = {}) {
 				let rowTotalColors = () => ({});
 				let colTotalColors = () => ({});
 
-				if (aggregatorCount === 1 && opts.mode && opts.mode !== 'table') {
+				// Apply heatmap colors if in heatmap mode (works with single or multiple aggregators)
+				// For multiple aggregators, use the first aggregator for heatmap coloring
+				if (opts.mode && ['heat-map-full', 'heat-map-col', 'heat-map-row'].includes(opts.mode)) {
 					const colorScaleGenerator = this.tableColorScaleGenerator;
-					const rowTotalValues = colKeys.map((colKey) =>
-						pivotData.getAggregator([], colKey, aggregatorList[0]).value()
-					);
+					const primaryAggregator = aggregatorList[0]; // Use first aggregator for heatmap
+					
+					const rowTotalValues = colKeys.map((colKey) => {
+						const agg = pivotData.getAggregator([], colKey, primaryAggregator);
+						return agg && typeof agg.value === 'function' ? agg.value() : null;
+					});
 					rowTotalColors = colorScaleGenerator(rowTotalValues);
-					const colTotalValues = rowKeys.map((rowKey) =>
-						pivotData.getAggregator(rowKey, [], aggregatorList[0]).value()
-					);
+					
+					const colTotalValues = rowKeys.map((rowKey) => {
+						const agg = pivotData.getAggregator(rowKey, [], primaryAggregator);
+						return agg && typeof agg.value === 'function' ? agg.value() : null;
+					});
 					colTotalColors = colorScaleGenerator(colTotalValues);
 
 					if (opts.mode === "heat-map-full") {
 						const allValues = [];
 						rowKeys.forEach((rowKey) =>
-							colKeys.forEach((colKey) =>
-								allValues.push(
-									pivotData.getAggregator(rowKey, colKey, aggregatorList[0]).value()
-								)
-							)
+							colKeys.forEach((colKey) => {
+								const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+								const val = agg && typeof agg.value === 'function' ? agg.value() : null;
+								allValues.push(val);
+							})
 						);
 						const colorScale = colorScaleGenerator(allValues);
-						valueCellColors = (r, c, v) => colorScale(v);
+						valueCellColors = (rowKey, colKey, value) => colorScale(value);
 					} else if (opts.mode === "heat-map-row") {
 						const rowColorScales = {};
+						// Create a key for each rowKey array for lookup
 						rowKeys.forEach((rowKey) => {
-							const rowValues = colKeys.map((colKey) =>
-								pivotData.getAggregator(rowKey, colKey, aggregatorList[0]).value()
-							);
-							rowColorScales[rowKey] = colorScaleGenerator(rowValues);
+							const flatRowKey = rowKey.join(String.fromCharCode(0));
+							const rowValues = colKeys.map((colKey) => {
+								const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+								return agg && typeof agg.value === 'function' ? agg.value() : null;
+							});
+							rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
 						});
-						valueCellColors = (r, c, v) => rowColorScales[r](v);
+						valueCellColors = (rowKey, colKey, value) => {
+							const flatRowKey = rowKey.join(String.fromCharCode(0));
+							const scale = rowColorScales[flatRowKey];
+							return scale ? scale(value) : {};
+						};
 					} else if (opts.mode === "heat-map-col") {
 						const colColorScales = {};
+						// Create a key for each colKey array for lookup
 						colKeys.forEach((colKey) => {
-							const colValues = rowKeys.map((rowKey) =>
-								pivotData.getAggregator(rowKey, colKey, aggregatorList[0]).value()
-							);
-							colColorScales[colKey] = colorScaleGenerator(colValues);
+							const flatColKey = colKey.join(String.fromCharCode(0));
+							const colValues = rowKeys.map((rowKey) => {
+								const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+								return agg && typeof agg.value === 'function' ? agg.value() : null;
+							});
+							colColorScales[flatColKey] = colorScaleGenerator(colValues);
 						});
-						valueCellColors = (r, c, v) => colColorScales[c](v);
+						valueCellColors = (rowKey, colKey, value) => {
+							const flatColKey = colKey.join(String.fromCharCode(0));
+							const scale = colColorScales[flatColKey];
+							return scale ? scale(value) : {};
+						};
 					}
 				}
 
