@@ -307,6 +307,8 @@ export default {
 					return;
 				}
 				const numInputs = aggregators[name]([])().numInputs || 0;
+				// Always ensure at least one value slot, even if numInputs is 0 (like Count)
+				const minInputs = numInputs > 0 ? numInputs : 1;
 				
 				// Initialize aggregatorVals for this aggregator if it doesn't exist
 				if (!this.propsData.aggregatorVals[name]) {
@@ -314,18 +316,20 @@ export default {
 				}
 				
 				const currentVals = this.propsData.aggregatorVals[name];
-				const nextVals = currentVals.slice(0, numInputs);
+				const nextVals = currentVals.slice(0, minInputs);
 				
-				// Fill up to required number of inputs
-				while (nextVals.length < numInputs) {
+				// Fill up to required number of inputs (at least 1)
+				while (nextVals.length < minInputs) {
 					const suggestion =
 						allowedAttributes[nextVals.length] || fallbackAttr || null;
 					nextVals.push(suggestion);
 				}
 				
-				// Trim if too many
-				if (nextVals.length > numInputs) {
+				// Trim if too many (but keep at least 1 if numInputs is 0)
+				if (numInputs > 0 && nextVals.length > numInputs) {
 					nextVals.splice(numInputs);
+				} else if (numInputs === 0 && nextVals.length > 1) {
+					nextVals.splice(1);
 				}
 				
 				this.propsData.aggregatorVals[name] = nextVals;
@@ -582,69 +586,70 @@ export default {
 												},
 											}),
 											// Value dropdown(s) for this aggregator
-											numInputs > 0
-												? h(
-														"span",
-														{
+											// Always show at least one value dropdown, even if numInputs is 0 (like Count)
+											h(
+												"span",
+												{
+													style: {
+														display: "inline-flex",
+														alignItems: "center",
+														gap: "6px",
+														marginLeft: "12px",
+														paddingLeft: "12px",
+														borderLeft: "1px solid #e2e8f0",
+													},
+												},
+												[
+													// Show "Values:" label only if numInputs > 1, otherwise "Value:"
+													(numInputs > 1 ? numInputs : 1) > 1
+														? h("span", {
+																style: {
+																	fontSize: "12px",
+																	color: "#64748b",
+																	fontWeight: "500",
+																	marginRight: "4px",
+																},
+															}, "Values:")
+														: h("span", {
+																style: {
+																	fontSize: "12px",
+																	color: "#64748b",
+																	fontWeight: "500",
+																	marginRight: "4px",
+																},
+															}, "Value:"),
+													// Always show at least one dropdown, use numInputs if > 0, otherwise 1
+													...new Array(numInputs > 0 ? numInputs : 1).fill().map((n, i) =>
+														h(Dropdown, {
 															style: {
-																display: "inline-flex",
-																alignItems: "center",
-																gap: "6px",
-																marginLeft: "12px",
-																paddingLeft: "12px",
-																borderLeft: "1px solid #e2e8f0",
+																display: "inline-block",
+																minWidth: "110px",
+																marginRight: i < (numInputs > 0 ? numInputs : 1) - 1 ? "8px" : "0",
+																fontSize: "13px",
 															},
-														},
-														[
-															numInputs > 1
-																? h("span", {
-																		style: {
-																			fontSize: "12px",
-																			color: "#64748b",
-																			fontWeight: "500",
-																			marginRight: "4px",
-																		},
-																	}, "Values:")
-																: h("span", {
-																		style: {
-																			fontSize: "12px",
-																			color: "#64748b",
-																			fontWeight: "500",
-																			marginRight: "4px",
-																		},
-																	}, "Value:"),
-															...new Array(numInputs).fill().map((n, i) =>
-																h(Dropdown, {
-																	style: {
-																		display: "inline-block",
-																		minWidth: "110px",
-																		marginRight: i < numInputs - 1 ? "8px" : "0",
-																		fontSize: "13px",
-																	},
-																	values: Object.keys(this.attrValues).filter(
-																		(e) =>
-																			!this.hiddenAttributes.includes(e) &&
-																			!this.hiddenFromAggregators.includes(e)
-																	),
-																	value: aggregatorVals[i] || null,
-																	title: __('Select the value field for this aggregation'),
-																	onInput: (value) => {
-																		if (!this.propsData.aggregatorVals[name]) {
-																			this.propsData.aggregatorVals[name] = [];
-																		}
-																		// Ensure array is long enough
-																		while (this.propsData.aggregatorVals[name].length <= i) {
-																			this.propsData.aggregatorVals[name].push(null);
-																		}
-																		this.propsData.aggregatorVals[name][i] = value;
-																		// Trigger reactivity by updating the object reference
-																		this.propsData.aggregatorVals = { ...this.propsData.aggregatorVals };
-																	},
-																})
+															values: Object.keys(this.attrValues).filter(
+																(e) =>
+																	!this.hiddenAttributes.includes(e) &&
+																	!this.hiddenFromAggregators.includes(e)
 															),
-														]
-												  )
-												: null,
+															value: aggregatorVals[i] || null,
+															title: __('Select the value field for this aggregation'),
+															onInput: (value) => {
+																if (!this.propsData.aggregatorVals[name]) {
+																	this.propsData.aggregatorVals[name] = [];
+																}
+																// Ensure array is long enough
+																while (this.propsData.aggregatorVals[name].length <= i) {
+																	this.propsData.aggregatorVals[name].push(null);
+																}
+																this.propsData.aggregatorVals[name][i] = value;
+																// Trigger reactivity by updating the object reference
+																this.propsData.aggregatorVals = { ...this.propsData.aggregatorVals };
+															},
+														})
+													),
+												]
+											),
 											this.selectedAggregators.length > 1
 												? h(
 														"a",

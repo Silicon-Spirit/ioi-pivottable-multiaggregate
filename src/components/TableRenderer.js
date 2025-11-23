@@ -232,6 +232,21 @@ function makeRenderer(opts = {}) {
 			if (['table', 'heat-map-full', 'heat-map-col', 'heat-map-row'].includes(opts.mode)) {
 				const pivotData = new PivotData(this.$props);
 
+				// Helper function to format aggregator name with value field
+				const formatAggregatorHeader = (aggName) => {
+					const aggregatorVals = this.aggregatorVals || {};
+					const vals = aggregatorVals[aggName];
+					if (vals && Array.isArray(vals) && vals.length > 0 && vals[0]) {
+						// Format: "AggregationName(ValueField)" or "AggregationName of ValueField" for Count
+						if (aggName === "Count" || aggName === __("Count")) {
+							return `${aggName} of ${vals[0]}`;
+						} else {
+							return `${aggName}(${vals[0]})`;
+						}
+					}
+					return aggName;
+				};
+
 				let aggregatorList = [];
 				if (typeof pivotData.getAggregatorNames === "function") {
 					const names = pivotData.getAggregatorNames();
@@ -453,7 +468,7 @@ function makeRenderer(opts = {}) {
 									class: ["pvtColLabel"],
 									key: `aggHeader-${aggIndex}`,
 								},
-								aggName
+								formatAggregatorHeader(aggName)
 							)
 						);
 					});
@@ -505,6 +520,15 @@ function makeRenderer(opts = {}) {
 							if (span === -1) {
 								return;
 							}
+							// When this is the "Values" row (last header row with multiple aggregators), show aggregator name with value field
+							let cellContent = colKey[attrIndex] != null ? colKey[attrIndex] : "";
+							if (isLastHeaderRow && attr === __("Values") && aggregatorCount > 1) {
+								// colKey[attrIndex] contains the aggregator name in the "Values" row
+								const aggName = cellContent;
+								if (aggName && aggregatorList.includes(aggName)) {
+									cellContent = formatAggregatorHeader(aggName);
+								}
+							}
 							cells.push(
 								h(
 									"th",
@@ -514,7 +538,7 @@ function makeRenderer(opts = {}) {
 										colSpan: span,
 										rowSpan: 1,
 									},
-									colKey[attrIndex] != null ? colKey[attrIndex] : ""
+									cellContent
 								)
 							);
 						});
@@ -551,7 +575,7 @@ function makeRenderer(opts = {}) {
 											class: ["pvtColLabel"],
 											key: `totalHeader-${aggIndex}`,
 										},
-										aggName
+										formatAggregatorHeader(aggName)
 									)
 								);
 							});

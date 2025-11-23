@@ -87,5 +87,11 @@ export default {
 				);
 			},
 		},
+		aggregatorVals: {
+			type: Object,
+			default: function () {
+				return {};
+			},
+		},
 	},
 };
