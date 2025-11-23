@@ -11,7 +11,7 @@
 				@input="generateData"
 			/>
 			<button @click="generateData">Generate Data</button>
-			<span class="info">Current dataset size: {{ currentData.length }} records</span>
+			<span class="info">Current dataset size: {{ currentData?.length || 0 }} records</span>
 		</div>
 		<PivottableUi
 			:data="currentData"
@@ -27,7 +27,7 @@
 </template>
 
 <script>
-import { ref } from "vue";
+import { ref, shallowRef } from "vue";
 import PivottableUi from "./PivottableUi.js";
 
 // Function to generate large datasets
@@ -76,7 +76,7 @@ export default {
 	},
 	setup() {
 		const datasetCount = ref(150000);
-		const currentData = ref(generateLargeDataset(150000));
+		const currentData = shallowRef(generateLargeDataset(150000));
 		
 		const generateData = () => {
 			const count = Math.max(1, Math.min(150000, datasetCount.value || 100));

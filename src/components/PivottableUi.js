@@ -91,7 +91,7 @@ export default {
 			return Object.keys(aggregators);
 		},
 		valueAttrOptions() {
-			return Object.keys(this.attrValues)
+			return Object.keys(this.attrValues.value || {})
 				.filter(
 					(attr) =>
 						!this.hiddenAttributes.includes(attr) &&
@@ -125,7 +125,7 @@ export default {
 			);
 		},
 		unusedAttrs() {
-			return Object.keys(this.attrValues)
+			return Object.keys(this.attrValues.value || {})
 				.filter(
 					(e) =>
 						!this.propsData.rows.includes(e) &&
@@ -134,6 +134,10 @@ export default {
 						!this.hiddenFromDragDrop.includes(e)
 				)
 				.sort(sortAs(this.unusedOrder));
+		},
+		// Computed property to unwrap attrValues for easier access
+		attrValuesUnwrapped() {
+			return this.attrValues.value || {};
 		},
 	},
 	data() {
@@ -152,12 +156,12 @@ export default {
 				aggregatorVals: {}, // Store vals per aggregator: { "Sum": ["Amount"], "Average": ["Amount"] }
 			},
 			openStatus: {},
-			attrValues: {},
+			attrValues: shallowRef({}),
 			unusedOrder: [],
 			zIndices: {},
 			maxZIndex: 1000,
 			openDropdown: false,
-			materializedInput: [],
+			materializedInput: shallowRef([]),
 			// Performance optimization: use shallowRef for large pivot results
 			pivotResult: shallowRef(null),
 			isCalculating: false,
@@ -222,7 +226,7 @@ export default {
 		}
 		this.updateAggregatorSelection(initialAggregators);
 		this.unusedOrder = this.unusedAttrs;
-		Object.keys(this.attrValues).map(this.assignValue);
+		Object.keys(this.attrValues.value || {}).map(this.assignValue);
 		Object.keys(this.openStatus).map(this.assignValue);
 		// Initial pivot calculation - don't debounce on mount
 		this.calculatePivot(true);
@@ -240,7 +244,7 @@ export default {
 			this.propsData.rows = this.rows;
 			this.propsData.cols = this.cols;
 			this.unusedOrder = this.unusedAttrs;
-			Object.keys(this.attrValues).map(this.assignValue);
+			Object.keys(this.attrValues.value || {}).map(this.assignValue);
 			Object.keys(this.openStatus).map(this.assignValue);
 		},
 		aggregatorName(newValue) {
@@ -502,8 +506,8 @@ export default {
 					recordsProcessed++;
 				}
 			);
-			this.materializedInput = materializedInput;
-			this.attrValues = attrValues;
+			this.materializedInput.value = materializedInput;
+			this.attrValues.value = attrValues;
 			
 			// Trigger pivot recalculation after materialization
 			this.calculatePivot();
@@ -581,8 +585,8 @@ export default {
 					};
 
 					// Convert Vue reactive proxies to plain objects for serialization
-					const dataToSend = this.materializedInput.length > 0 
-						? serializeForWorker(this.materializedInput)
+					const dataToSend = this.materializedInput.value.length > 0 
+						? serializeForWorker(this.materializedInput.value)
 						: serializeForWorker(this.data);
 
 					// Serialize the entire config object
@@ -631,7 +635,7 @@ export default {
 			try {
 				const calcStartTime = performance.now();
 				const pivotData = new PivotData({
-					data: this.materializedInput.length > 0 ? this.materializedInput : this.data,
+					data: this.materializedInput.value.length > 0 ? this.materializedInput.value : this.data,
 					rows: this.propsData.rows,
 					cols: this.propsData.cols,
 					vals: this.propsData.vals,
@@ -743,7 +747,7 @@ export default {
 								!this.disabledFromDragDrop.includes(element),
 							name: element,
 							key: element,
-							attrValues: this.attrValues[element],
+							attrValues: (this.attrValues.value || {})[element] || {},
 							sorter: getSort(this.sorters, element),
 							menuLimit: this.menuLimit,
 							zIndex: this.zIndices[element] || this.maxZIndex,
@@ -866,7 +870,7 @@ export default {
 																marginRight: i < (numInputs > 0 ? numInputs : 1) - 1 ? "8px" : "0",
 																fontSize: "13px",
 															},
-															values: Object.keys(this.attrValues).filter(
+															values: Object.keys(this.attrValues.value || {}).filter(
 																(e) =>
 																	!this.hiddenAttributes.includes(e) &&
 																	!this.hiddenFromAggregators.includes(e)
@@ -1050,7 +1054,7 @@ export default {
 		);
 		const props = {
 			...this.$props,
-			data: this.materializedInput,
+			data: this.materializedInput.value,
 			rowOrder: this.propsData.rowOrder,
 			colOrder: this.propsData.colOrder,
 			valueFilter: this.propsData.valueFilter,

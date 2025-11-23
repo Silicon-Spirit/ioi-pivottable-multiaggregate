@@ -596,8 +596,8 @@ function makeRenderer(opts = {}) {
 								rowKeys.forEach((rowKey) => {
 									const flatRowKey = rowKey.join(String.fromCharCode(0));
 									const rowValues = colKeys.map((colKey) => {
-										const flatColKey = colKey.join(String.fromCharCode(0));
-										return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
+										const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+										return agg && typeof agg.value === 'function' ? agg.value() : null;
 									});
 									rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
 								});
@@ -611,8 +611,8 @@ function makeRenderer(opts = {}) {
 								colKeys.forEach((colKey) => {
 									const flatColKey = colKey.join(String.fromCharCode(0));
 									const colValues = rowKeys.map((rowKey) => {
-										const flatRowKey = rowKey.join(String.fromCharCode(0));
-										return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
+										const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
+										return agg && typeof agg.value === 'function' ? agg.value() : null;
 									});
 									colColorScales[flatColKey] = colorScaleGenerator(colValues);
 								});
