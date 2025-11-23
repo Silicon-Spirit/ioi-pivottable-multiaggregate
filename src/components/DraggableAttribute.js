@@ -113,7 +113,8 @@ export default {
 		},
 		getFilterBox() {
 			const showMenu = Object.keys(this.attrValues).length < this.menuLimit;
-			const values = Object.keys(this.attrValues);
+			// Filter out "null" from the values list
+			const values = Object.keys(this.attrValues).filter((val) => val !== "null" && val !== null);
 			const shown = values
 				.filter(this.matchesFilter.bind(this))
 				.sort(this.sorter);
@@ -169,9 +170,9 @@ export default {
 											onClick: () =>
 												this.removeValuesFromFilter(
 													this.name,
-													Object.keys(this.attrValues).filter(
-														this.matchesFilter.bind(this)
-													)
+													Object.keys(this.attrValues)
+														.filter((val) => val !== "null" && val !== null)
+														.filter(this.matchesFilter.bind(this))
 												),
 										},
 										__("Select {0}", [values.length === shown.length ? __("all") : shown.length])
@@ -184,9 +185,9 @@ export default {
 											onClick: () =>
 												this.addValuesToFilter(
 													this.name,
-													Object.keys(this.attrValues).filter(
-														this.matchesFilter.bind(this)
-													)
+													Object.keys(this.attrValues)
+														.filter((val) => val !== "null" && val !== null)
+														.filter(this.matchesFilter.bind(this))
 												),
 										},
 										__("Unselect {0}", [values.length === shown.length ? __("all") : shown.length])

@@ -282,13 +282,6 @@ function makeRenderer(opts = {}) {
 				const baseRowKeys = pivotData.getRowKeys();
 				const baseColKeys = pivotData.getColKeys();
 				
-				// Check if all data is filtered out - if both rowKeys and colKeys are empty and tree is empty, don't display the table
-				const isAllDataFiltered = baseRowKeys.length === 0 && baseColKeys.length === 0 && Object.keys(pivotData.tree).length === 0;
-				
-				if (isAllDataFiltered) {
-					return null; // Don't display the table when all values are filtered
-				}
-				
 				// Filter out rows and columns where any header value is "null"
 				const filteredRowKeys = baseRowKeys.filter((rowKey) => {
 					// Exclude rows where any part of the rowKey is "null"
@@ -303,6 +296,22 @@ function makeRenderer(opts = {}) {
 					if (colKey.length === 0) return true;
 					return !colKey.some((val) => val === "null" || val === null);
 				});
+				
+				// Check if all data is filtered out - hide table if:
+				// 1. Both rowKeys and colKeys are empty and tree is empty, OR
+				// 2. There are row attributes defined but all rowKeys are filtered out, OR
+				// 3. There are column attributes defined but all colKeys are filtered out
+				const hasRowAttrs = rowAttrs.length > 0;
+				const hasColAttrs = colAttrs.length > 0;
+				const allRowsFiltered = hasRowAttrs && filteredRowKeys.length === 0;
+				const allColsFiltered = hasColAttrs && filteredColKeys.length === 0;
+				const bothEmpty = filteredRowKeys.length === 0 && filteredColKeys.length === 0 && Object.keys(pivotData.tree).length === 0;
+				
+				const isAllDataFiltered = bothEmpty || allRowsFiltered || allColsFiltered;
+				
+				if (isAllDataFiltered) {
+					return null; // Don't display the table when all values are filtered
+				}
 				
 				const rowKeys = filteredRowKeys.length ? filteredRowKeys : [[]];
 				const colKeys = filteredColKeys.length ? filteredColKeys : [[]];
