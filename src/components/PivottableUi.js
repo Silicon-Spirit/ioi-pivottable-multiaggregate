@@ -140,6 +140,7 @@ export default {
 				cols: [],
 				rows: [],
 				valueFilter: {},
+				aggregatorVals: {}, // Store vals per aggregator: { "Sum": ["Amount"], "Average": ["Amount"] }
 			},
 			openStatus: {},
 			attrValues: {},
@@ -176,6 +177,10 @@ export default {
 		this.propsData.vals = this.vals.slice();
 		this.propsData.rows = this.rows;
 		this.propsData.cols = this.cols;
+		// Initialize aggregatorVals if not already set
+		if (!this.propsData.aggregatorVals || Object.keys(this.propsData.aggregatorVals).length === 0) {
+			this.propsData.aggregatorVals = {};
+		}
 		const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
 			Object.keys(aggregators).includes(name)
 		);
@@ -289,15 +294,7 @@ export default {
 			return normalized;
 		},
 		ensureValSlots(aggregatorList) {
-			const required = aggregatorList.reduce((largest, name) => {
-				if (!aggregators[name]) {
-					return largest;
-				}
-				const numInputs =
-					aggregators[name]([])().numInputs || 0;
-				return Math.max(largest, numInputs);
-			}, 0);
-
+			// Ensure each aggregator has its required number of value slots
 			const allowedAttributes = this.valueAttrOptions;
 			const fallbackAttr =
 				allowedAttributes[0] ||
@@ -305,17 +302,68 @@ export default {
 				this.vals[0] ||
 				null;
 
-			const nextVals = this.propsData.vals.slice(0, required);
-			while (nextVals.length < required) {
-				const suggestion =
-					allowedAttributes[nextVals.length] || fallbackAttr || null;
-				nextVals.push(suggestion);
-			}
+			aggregatorList.forEach((name) => {
+				if (!aggregators[name]) {
+					return;
+				}
+				const numInputs = aggregators[name]([])().numInputs || 0;
+				
+				// Initialize aggregatorVals for this aggregator if it doesn't exist
+				if (!this.propsData.aggregatorVals[name]) {
+					this.propsData.aggregatorVals[name] = [];
+				}
+				
+				const currentVals = this.propsData.aggregatorVals[name];
+				const nextVals = currentVals.slice(0, numInputs);
+				
+				// Fill up to required number of inputs
+				while (nextVals.length < numInputs) {
+					const suggestion =
+						allowedAttributes[nextVals.length] || fallbackAttr || null;
+					nextVals.push(suggestion);
+				}
+				
+				// Trim if too many
+				if (nextVals.length > numInputs) {
+					nextVals.splice(numInputs);
+				}
+				
+				this.propsData.aggregatorVals[name] = nextVals;
+			});
 
-			if (required === 0) {
+			// Remove vals for aggregators that are no longer selected
+			Object.keys(this.propsData.aggregatorVals).forEach((name) => {
+				if (!aggregatorList.includes(name)) {
+					delete this.propsData.aggregatorVals[name];
+				}
+			});
+
+			// For backward compatibility, also update the main vals array
+			// Use the first aggregator's vals or the maximum required
+			const maxRequired = aggregatorList.reduce((largest, name) => {
+				if (!aggregators[name]) {
+					return largest;
+				}
+				const numInputs = aggregators[name]([])().numInputs || 0;
+				return Math.max(largest, numInputs);
+			}, 0);
+
+			if (maxRequired === 0) {
 				this.propsData.vals = [];
 			} else {
-				this.propsData.vals = nextVals;
+				// Use first aggregator's vals or create default
+				const firstAggregator = aggregatorList[0];
+				if (firstAggregator && this.propsData.aggregatorVals[firstAggregator]) {
+					this.propsData.vals = this.propsData.aggregatorVals[firstAggregator].slice();
+				} else {
+					const nextVals = this.propsData.vals.slice(0, maxRequired);
+					while (nextVals.length < maxRequired) {
+						const suggestion =
+							allowedAttributes[nextVals.length] || fallbackAttr || null;
+						nextVals.push(suggestion);
+					}
+					this.propsData.vals = nextVals;
+				}
 			}
 		},
 		updateAggregatorSelection(list) {
@@ -360,6 +408,15 @@ export default {
 			const current = this.selectedAggregators.slice();
 			if (current[index] === value) {
 				return;
+			}
+			const oldAggregatorName = current[index];
+			// Preserve vals when changing aggregator if the new aggregator doesn't have vals yet
+			if (oldAggregatorName && this.propsData.aggregatorVals[oldAggregatorName]) {
+				const oldVals = this.propsData.aggregatorVals[oldAggregatorName];
+				if (!this.propsData.aggregatorVals[value]) {
+					// Copy vals from old aggregator if new one doesn't have any
+					this.propsData.aggregatorVals[value] = oldVals.slice();
+				}
 			}
 			const duplicateIndex = current.findIndex((item, idx) => item === value && idx !== index);
 			if (duplicateIndex !== -1) {
@@ -500,8 +557,12 @@ export default {
 							h(
 								"div",
 								{ class: ["pvtAggregatorList"] },
-								this.selectedAggregators.map((name, index) =>
-									h(
+								this.selectedAggregators.map((name, index) => {
+									const aggregator = aggregators[name];
+									const numInputs = aggregator ? (aggregator([])().numInputs || 0) : 0;
+									const aggregatorVals = this.propsData.aggregatorVals[name] || [];
+									
+									return h(
 										"div",
 										{
 											class: ["pvtAggregatorOption"],
@@ -511,6 +572,7 @@ export default {
 											h(Dropdown, {
 												style: {
 													display: "inline-block",
+													minWidth: "120px",
 												},
 												values: this.availableAggregators,
 												value: name,
@@ -519,6 +581,70 @@ export default {
 													this.changeAggregator(index, value);
 												},
 											}),
+											// Value dropdown(s) for this aggregator
+											numInputs > 0
+												? h(
+														"span",
+														{
+															style: {
+																display: "inline-flex",
+																alignItems: "center",
+																gap: "6px",
+																marginLeft: "12px",
+																paddingLeft: "12px",
+																borderLeft: "1px solid #e2e8f0",
+															},
+														},
+														[
+															numInputs > 1
+																? h("span", {
+																		style: {
+																			fontSize: "12px",
+																			color: "#64748b",
+																			fontWeight: "500",
+																			marginRight: "4px",
+																		},
+																	}, "Values:")
+																: h("span", {
+																		style: {
+																			fontSize: "12px",
+																			color: "#64748b",
+																			fontWeight: "500",
+																			marginRight: "4px",
+																		},
+																	}, "Value:"),
+															...new Array(numInputs).fill().map((n, i) =>
+																h(Dropdown, {
+																	style: {
+																		display: "inline-block",
+																		minWidth: "110px",
+																		marginRight: i < numInputs - 1 ? "8px" : "0",
+																		fontSize: "13px",
+																	},
+																	values: Object.keys(this.attrValues).filter(
+																		(e) =>
+																			!this.hiddenAttributes.includes(e) &&
+																			!this.hiddenFromAggregators.includes(e)
+																	),
+																	value: aggregatorVals[i] || null,
+																	title: __('Select the value field for this aggregation'),
+																	onInput: (value) => {
+																		if (!this.propsData.aggregatorVals[name]) {
+																			this.propsData.aggregatorVals[name] = [];
+																		}
+																		// Ensure array is long enough
+																		while (this.propsData.aggregatorVals[name].length <= i) {
+																			this.propsData.aggregatorVals[name].push(null);
+																		}
+																		this.propsData.aggregatorVals[name][i] = value;
+																		// Trigger reactivity by updating the object reference
+																		this.propsData.aggregatorVals = { ...this.propsData.aggregatorVals };
+																	},
+																})
+															),
+														]
+												  )
+												: null,
 											this.selectedAggregators.length > 1
 												? h(
 														"a",
@@ -535,8 +661,8 @@ export default {
 												  )
 												: null,
 										]
-									)
-								)
+									);
+								})
 							),
 							this.selectedAggregators.length < this.availableAggregators.length
 								? h(
@@ -589,21 +715,7 @@ export default {
 									),
 								]
 							),
-							this.numValsAllowed > 0
-								? new Array(this.numValsAllowed).fill().map((n, i) => [
-										h(Dropdown, {
-											values: Object.keys(this.attrValues).filter(
-												(e) =>
-													!this.hiddenAttributes.includes(e) &&
-													!this.hiddenFromAggregators.includes(e)
-											),
-											value: vals[i],
-											onInput: (value) => {
-												this.propsData.vals.splice(i, 1, value);
-											},
-										}),
-									])
-								: undefined,
+							// Old shared value dropdowns removed - each aggregator now has its own value dropdowns
 						]
 					);
 		},
@@ -703,6 +815,7 @@ export default {
 			aggregatorName,
 			aggregatorNames,
 			vals,
+			aggregatorVals: this.propsData.aggregatorVals, // Pass per-aggregator vals
 		};
 
 		const rendererCell = this.rendererCell(rendererName);

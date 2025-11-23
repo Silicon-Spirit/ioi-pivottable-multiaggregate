@@ -555,13 +555,17 @@ class PivotData {
 	constructor(inputProps = {}) {
 		this.props = Object.assign({}, PivotData.defaultProps, inputProps);
 		this.aggregatorNames = this.resolveAggregatorNames();
+		// Use aggregatorVals if provided, otherwise fall back to single vals array
+		const aggregatorVals = this.props.aggregatorVals || {};
 		this.aggregatorFactories = this.aggregatorNames
 			.map((name) => {
 				const generator = this.props.aggregators[name];
 				if (typeof generator !== "function") {
 					return null;
 				}
-				const factory = generator(this.props.vals);
+				// Use per-aggregator vals if available, otherwise use the shared vals array
+				const vals = aggregatorVals[name] || this.props.vals || [];
+				const factory = generator(vals);
 				if (typeof factory !== "function") {
 					return null;
 				}
@@ -572,7 +576,10 @@ class PivotData {
 		if (!this.aggregatorFactories.length) {
 			const fallbackName = Object.keys(this.props.aggregators)[0];
 			if (fallbackName) {
-				const fallbackFactory = this.props.aggregators[fallbackName](this.props.vals);
+				// Use per-aggregator vals if available, otherwise use the shared vals array
+				const aggregatorVals = this.props.aggregatorVals || {};
+				const vals = aggregatorVals[fallbackName] || this.props.vals || [];
+				const fallbackFactory = this.props.aggregators[fallbackName](vals);
 				this.aggregatorFactories.push({
 					name: fallbackName,
 					factory: fallbackFactory,

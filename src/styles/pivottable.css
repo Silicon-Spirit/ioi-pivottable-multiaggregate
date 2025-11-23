@@ -265,6 +265,68 @@ table.pvtTable tbody tr td {
 	margin-bottom: 0px;
 }
 
+/* Aggregator list and options styling */
+.pvtAggregatorList {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 8px;
+	width: 100%;
+}
+
+.pvtAggregatorOption {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	background: #ffffff;
+	border: 1px solid #e0e0e0;
+	padding: 10px 12px;
+	border-radius: 6px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	transition: all 0.2s ease;
+	flex-wrap: wrap;
+	width: 100%;
+}
+
+.pvtAggregatorOption:hover {
+	border-color: #2196f3;
+	box-shadow: 0 2px 6px rgba(33, 150, 243, 0.15);
+}
+
+.pvtAggregatorOption .pvtDropdown {
+	width: auto !important;
+	min-width: 120px;
+	margin: 0 !important;
+	flex-shrink: 0;
+}
+
+/* Value dropdowns within aggregator options */
+.pvtAggregatorOption span {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.pvtAggregatorOption span .pvtDropdown {
+	min-width: 100px;
+	background-color: #e3f2fd !important;
+	border-color: #90caf9 !important;
+	border-width: 1.5px !important;
+	font-weight: 500;
+}
+
+.pvtAggregatorOption span .pvtDropdown:hover {
+	background-color: #bbdefb !important;
+	border-color: #2196f3 !important;
+	box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
+}
+
+.pvtAggregatorOption span .pvtDropdown:focus {
+	background-color: #bbdefb !important;
+	border-color: #1976d2 !important;
+	box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.2);
+}
+
 .pvtVals {
 	white-space: nowrap;
 	vertical-align: top;

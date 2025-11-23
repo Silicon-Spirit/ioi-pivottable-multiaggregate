@@ -18,7 +18,7 @@
 			:rows="['Department']"
 			:cols="['Quarter']"
 			:vals="['Amount']"
-			:aggregatorNames="['Sum', 'Average']"
+			:aggregatorNames="['Count', 'Sum']"
 			rendererName="Table"
 			:rowTotal="true"
 			:colTotal="true"
