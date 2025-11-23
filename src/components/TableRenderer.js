@@ -266,8 +266,31 @@ function makeRenderer(opts = {}) {
 
 				const baseRowKeys = pivotData.getRowKeys();
 				const baseColKeys = pivotData.getColKeys();
-				const rowKeys = baseRowKeys.length ? baseRowKeys : [[]];
-				const colKeys = baseColKeys.length ? baseColKeys : [[]];
+				
+				// Check if all data is filtered out - if both rowKeys and colKeys are empty and tree is empty, don't display the table
+				const isAllDataFiltered = baseRowKeys.length === 0 && baseColKeys.length === 0 && Object.keys(pivotData.tree).length === 0;
+				
+				if (isAllDataFiltered) {
+					return null; // Don't display the table when all values are filtered
+				}
+				
+				// Filter out rows and columns where any header value is "null"
+				const filteredRowKeys = baseRowKeys.filter((rowKey) => {
+					// Exclude rows where any part of the rowKey is "null"
+					// Empty arrays are allowed (for grand totals)
+					if (rowKey.length === 0) return true;
+					return !rowKey.some((val) => val === "null" || val === null);
+				});
+				
+				const filteredColKeys = baseColKeys.filter((colKey) => {
+					// Exclude columns where any part of the colKey is "null"
+					// Empty arrays are allowed (for grand totals)
+					if (colKey.length === 0) return true;
+					return !colKey.some((val) => val === "null" || val === null);
+				});
+				
+				const rowKeys = filteredRowKeys.length ? filteredRowKeys : [[]];
+				const colKeys = filteredColKeys.length ? filteredColKeys : [[]];
 
 				const effectiveColKeys =
 					aggregatorCount > 1
@@ -278,7 +301,7 @@ function makeRenderer(opts = {}) {
 								colKey.length === 0 ? [aggregatorList[0]] : colKey
 						  );
 
-				const columnDescriptors =
+				let columnDescriptors =
 					aggregatorCount > 1
 						? colKeys.flatMap((colKey) =>
 								aggregatorList.map((aggName) => ({
@@ -290,6 +313,11 @@ function makeRenderer(opts = {}) {
 								colKey,
 								aggregatorName: aggregatorList[0],
 						  }));
+
+				// When there are no horizontal header fields, remove the rightmost columns equal to the number of aggregators
+				if (colAttrs.length === 0 && columnDescriptors.length >= aggregatorCount) {
+					columnDescriptors = columnDescriptors.slice(0, -aggregatorCount);
+				}
 
 				const headerColAttrs =
 					aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
@@ -368,32 +396,34 @@ function makeRenderer(opts = {}) {
 
 				if (!colAttrs.length) {
 					const rowCells = [];
-					if (rowAttrs.length) {
-						rowCells.push(
-							h(
-								"th",
-								{
-									class: ["pvtTotalGroupLabel"],
-									colSpan: rowAttrs.length || 1,
-								},
-								__("Totals")
-							)
-						);
-					}
+					// When no column attributes:
+					// 1. Add row attribute labels - the last one should span to cover corner area
 					if (rowAttrs.length) {
 						rowAttrs.forEach((r, i) => {
+							const isLastRowAttr = i === rowAttrs.length - 1;
 							rowCells.push(
 								h(
 									"th",
 									{
 										class: ["pvtAxisLabel"],
 										key: `rowAttr${i}`,
+										// Last row attribute spans to cover corner area (its own column + corner = 2 columns)
+										colSpan: isLastRowAttr ? 2 : 1,
 									},
 									r
 								)
 							);
 						});
+					} else {
+						// If no row attributes, add empty corner cell
+						rowCells.push(
+							h("th", {
+								class: ["pvtAxisLabel"],
+								colSpan: 1,
+							}, null)
+						);
 					}
+					// 2. Add aggregator names starting from where table body begins (one position to the right of last row attr)
 					aggregatorList.forEach((aggName, aggIndex) => {
 						rowCells.push(
 							h(
@@ -527,185 +557,267 @@ function makeRenderer(opts = {}) {
 					});
 				}
 
-				const bodyRows = rowKeys.map((rowKey, rowIndex) => {
-					const rowCells = [];
+				// When there are no vertical header fields, skip data rows (only show Totals row)
+				const bodyRows = rowAttrs.length === 0 
+					? []
+					: rowKeys.map((rowKey, rowIndex) => {
+						const rowCells = [];
 
-					rowKey.forEach((txt, attrIndex) => {
-						const span = this.spanSize(rowKeys, rowIndex, attrIndex);
-						if (span === -1) {
-							return;
-						}
-						rowCells.push(
-							h(
-								"th",
-								{
-									class: ["pvtRowLabel"],
-									key: `rowKeyLabel${rowIndex}-${attrIndex}`,
-									rowSpan: span,
-									colSpan:
-										attrIndex === rowAttrs.length - 1 && headerColAttrs.length !== 0
-											? 2
-											: 1,
-								},
-								txt
-							)
-						);
-					});
-
-					columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
-						const aggregator = pivotData.getAggregator(rowKey, colKey, aggregatorName);
-						const value =
-							aggregator && typeof aggregator.value === "function"
-								? aggregator.value()
-								: null;
-						const { formatted, isEmpty } = formatCellDisplay(aggregator, value);
-						const cellClasses = ["pvVal"];
-						if (isEmpty) {
-							cellClasses.push("pvtEmpty");
-						}
-						rowCells.push(
-							h(
-								"td",
-								Object.assign(
+						rowKey.forEach((txt, attrIndex) => {
+							const span = this.spanSize(rowKeys, rowIndex, attrIndex);
+							if (span === -1) {
+								return;
+							}
+							const isLastRowAttr = attrIndex === rowAttrs.length - 1;
+							// Last row attribute should span 2 columns when:
+							// 1. There are column attributes (headerColAttrs.length !== 0), OR
+							// 2. There are no column attributes (to cover corner area)
+							const shouldSpan = isLastRowAttr && (
+								headerColAttrs.length !== 0 || 
+								colAttrs.length === 0
+							);
+							rowCells.push(
+								h(
+									"th",
 									{
-										class: cellClasses,
-										style: valueCellColors(rowKey, colKey, value),
-										key: `pvtVal${rowIndex}-${descriptorIndex}`,
+										class: ["pvtRowLabel"],
+										key: `rowKeyLabel${rowIndex}-${attrIndex}`,
+										rowSpan: span,
+										colSpan: shouldSpan ? 2 : 1,
 									},
-									getClickHandler
-										? {
-												onClick: getClickHandler(value, rowKey, colKey),
-										  }
-										: {}
-								),
-								formatted
-							)
-						);
-					});
+									txt
+								)
+							);
+						});
 
-					if (this.rowTotal) {
-						aggregatorList.forEach((aggName, aggIndex) => {
-							const totalAggregator = pivotData.getAggregator(rowKey, [], aggName);
-							const totalValue =
-								totalAggregator && typeof totalAggregator.value === "function"
-									? totalAggregator.value()
+						columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
+							const aggregator = pivotData.getAggregator(rowKey, colKey, aggregatorName);
+							const value =
+								aggregator && typeof aggregator.value === "function"
+									? aggregator.value()
 									: null;
-							const totalDisplay = formatCellDisplay(totalAggregator, totalValue);
-							const totalClasses = ["pvtTotal"];
-							if (totalDisplay.isEmpty) {
-								totalClasses.push("pvtEmpty");
+							const { formatted, isEmpty } = formatCellDisplay(aggregator, value);
+							const cellClasses = ["pvVal"];
+							if (isEmpty) {
+								cellClasses.push("pvtEmpty");
 							}
 							rowCells.push(
 								h(
 									"td",
 									Object.assign(
 										{
-											class: totalClasses,
-											style: colTotalColors(totalValue),
-											key: `rowTotal${rowIndex}-${aggIndex}`,
+											class: cellClasses,
+											style: valueCellColors(rowKey, colKey, value),
+											key: `pvtVal${rowIndex}-${descriptorIndex}`,
 										},
 										getClickHandler
 											? {
-													onClick: getClickHandler(totalValue, rowKey, [null]),
+													onClick: getClickHandler(value, rowKey, colKey),
 											  }
 											: {}
 									),
-									totalDisplay.formatted
+									formatted
 								)
 							);
 						});
-					}
 
-					return h(
-						"tr",
-						{
-							key: `rowKeyRow${rowIndex}`,
-						},
-						rowCells
-					);
-				});
+						if (this.rowTotal) {
+							aggregatorList.forEach((aggName, aggIndex) => {
+								const totalAggregator = pivotData.getAggregator(rowKey, [], aggName);
+								const totalValue =
+									totalAggregator && typeof totalAggregator.value === "function"
+										? totalAggregator.value()
+										: null;
+								const totalDisplay = formatCellDisplay(totalAggregator, totalValue);
+								const totalClasses = ["pvtTotal"];
+								if (totalDisplay.isEmpty) {
+									totalClasses.push("pvtEmpty");
+								}
+								rowCells.push(
+									h(
+										"td",
+										Object.assign(
+											{
+												class: totalClasses,
+												style: colTotalColors(totalValue),
+												key: `rowTotal${rowIndex}-${aggIndex}`,
+											},
+											getClickHandler
+												? {
+														onClick: getClickHandler(totalValue, rowKey, [null]),
+												  }
+												: {}
+										),
+										totalDisplay.formatted
+									)
+								);
+							});
+						}
+
+						return h(
+							"tr",
+							{
+								key: `rowKeyRow${rowIndex}`,
+							},
+							rowCells
+						);
+					});
 
 				if (this.colTotal) {
 					const totalCells = [];
-				const labelColSpan = rowAttrs.length + (headerColAttrs.length > 0 ? 1 : 0);
-
-				if (labelColSpan > 0 && headerColAttrs.length) {
-					totalCells.push(
-						h(
-							"th",
-							{
-								class: ["pvtTotalLabel"],
-								colSpan: labelColSpan,
-							},
-							__("Totals")
-						)
-					);
-				}
-
-					columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
-						const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
-						const totalValue =
-							totalAggregator && typeof totalAggregator.value === "function"
-								? totalAggregator.value()
+					
+					// Special handling when there are no horizontal header fields and only one aggregation
+					if (colAttrs.length === 0 && aggregatorCount === 1 && this.rowTotal) {
+						// Get the rightmost value (grand total) - this is the value that should go in the first column
+						const grandAggregator = pivotData.getAggregator([], [], aggregatorList[0]);
+						const grandValue =
+							grandAggregator && typeof grandAggregator.value === "function"
+								? grandAggregator.value()
 								: null;
-						const columnDisplay = formatCellDisplay(totalAggregator, totalValue);
-						const columnClasses = ["pvtTotal"];
-						if (columnDisplay.isEmpty) {
-							columnClasses.push("pvtEmpty");
+						const grandDisplay = formatCellDisplay(grandAggregator, grandValue);
+						const grandClasses = ["pvtGrandTotal"];
+						if (grandDisplay.isEmpty) {
+							grandClasses.push("pvtEmpty");
 						}
+						
+						// Calculate total columns in a data row to match the structure
+						// Structure of data rows: row attrs (with last spanning 2) + data columns (0 after removal) + row total (1)
+						let totalColsInDataRow = 0;
+						if (rowAttrs.length > 0) {
+							// Row attrs: first (rowAttrs.length - 1) take 1 column each, last takes 2 columns
+							totalColsInDataRow = (rowAttrs.length - 1) + 2;
+						} else {
+							// No row attrs, but there's still a corner cell (colSpan 1)
+							totalColsInDataRow = 1;
+						}
+						totalColsInDataRow += columnDescriptors.length; // This will be 0 after removal
+						totalColsInDataRow += (this.rowTotal ? aggregatorList.length : 0); // Row total column (1)
+						
+						// First cell: "Totals" label spanning all columns except the rightmost
+						// So it should span: totalColsInDataRow - 1 (subtract 1 for the rightmost column)
+						const totalsLabelSpan = Math.max(0, totalColsInDataRow - 1);
+						
+						if (totalsLabelSpan > 0) {
+							totalCells.push(
+								h(
+									"th",
+									{
+										class: ["pvtTotalLabel"],
+										colSpan: totalsLabelSpan,
+										style: {
+											backgroundColor: "#ebf0f8", // Header background color
+										},
+									},
+									__("Totals")
+								)
+							);
+						}
+						
+						// Last cell: The grand total value (rightmost position)
 						totalCells.push(
 							h(
 								"td",
 								Object.assign(
 									{
-										class: columnClasses,
-										style: rowTotalColors(totalValue),
-										key: `colTotal${descriptorIndex}`,
+										class: grandClasses,
+										key: "grandTotalRightmost",
 									},
 									getClickHandler
 										? {
-												onClick: getClickHandler(totalValue, [null], colKey),
+												onClick: getClickHandler(grandValue, [null], [null]),
 										  }
 										: {}
 								),
-								columnDisplay.formatted
+								grandDisplay.formatted
 							)
 						);
-					});
+					} else {
+						// Original logic for other cases
+						const labelColSpan = rowAttrs.length + (headerColAttrs.length > 0 ? 1 : 0);
 
-					if (this.rowTotal) {
-						aggregatorList.forEach((aggName, aggIndex) => {
-							const grandAggregator = pivotData.getAggregator([], [], aggName);
-							const grandValue =
-								grandAggregator && typeof grandAggregator.value === "function"
-									? grandAggregator.value()
+						if (labelColSpan > 0 && headerColAttrs.length) {
+							totalCells.push(
+								h(
+									"th",
+									{
+										class: ["pvtTotalLabel"],
+										colSpan: labelColSpan,
+									},
+									__("Totals")
+								)
+							);
+						}
+
+						columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
+							const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
+							const totalValue =
+								totalAggregator && typeof totalAggregator.value === "function"
+									? totalAggregator.value()
 									: null;
-							const grandDisplay = formatCellDisplay(grandAggregator, grandValue);
-							const grandClasses = ["pvtGrandTotal"];
-							if (grandDisplay.isEmpty) {
-								grandClasses.push("pvtEmpty");
+							const columnDisplay = formatCellDisplay(totalAggregator, totalValue);
+							const columnClasses = ["pvtTotal"];
+							if (columnDisplay.isEmpty) {
+								columnClasses.push("pvtEmpty");
 							}
 							totalCells.push(
 								h(
 									"td",
 									Object.assign(
 										{
-											class: grandClasses,
-											key: `grandTotal${aggIndex}`,
+											class: columnClasses,
+											style: rowTotalColors(totalValue),
+											key: `colTotal${descriptorIndex}`,
 										},
 										getClickHandler
 											? {
-													onClick: getClickHandler(grandValue, [null], [null]),
+													onClick: getClickHandler(totalValue, [null], colKey),
 											  }
 											: {}
 									),
-									grandDisplay.formatted
+									columnDisplay.formatted
 								)
 							);
 						});
+
+						if (this.rowTotal) {
+							aggregatorList.forEach((aggName, aggIndex) => {
+								const grandAggregator = pivotData.getAggregator([], [], aggName);
+								const grandValue =
+									grandAggregator && typeof grandAggregator.value === "function"
+										? grandAggregator.value()
+										: null;
+								const grandDisplay = formatCellDisplay(grandAggregator, grandValue);
+								const grandClasses = ["pvtGrandTotal"];
+								if (grandDisplay.isEmpty) {
+									grandClasses.push("pvtEmpty");
+								}
+								totalCells.push(
+									h(
+										"td",
+										Object.assign(
+											{
+												class: grandClasses,
+												key: `grandTotal${aggIndex}`,
+											},
+											getClickHandler
+												? {
+														onClick: getClickHandler(grandValue, [null], [null]),
+												  }
+												: {}
+										),
+										grandDisplay.formatted
+									)
+								);
+							});
+						}
 					}
 
 					bodyRows.push(h("tr", totalCells));
+				}
+
+				// If there are no body rows at all (no data rows and no totals), don't display the table
+				if (bodyRows.length === 0) {
+					return null;
 				}
 
 				return h(

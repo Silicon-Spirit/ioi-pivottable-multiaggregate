@@ -15,10 +15,6 @@ export default {
 			type: [Array, Object, Function],
 			required: true,
 		},
-		aggregatorName: {
-			type: [String, Array],
-			default: __("Count"),
-		},
 		aggregatorNames: {
 			type: Array,
 			default: function () {
