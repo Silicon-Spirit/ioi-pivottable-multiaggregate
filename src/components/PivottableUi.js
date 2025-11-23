@@ -12,6 +12,50 @@ import "../styles/pivottable.css";
 // Threshold for using Web Worker (records count)
 const WORKER_THRESHOLD = 10000;
 
+// LRU Cache implementation
+class LRUCache {
+	constructor(maxSize = 5) {
+		this.maxSize = maxSize;
+		this.cache = new Map(); // Map maintains insertion order in modern JS
+	}
+
+	get(key) {
+		if (!this.cache.has(key)) {
+			return null;
+		}
+		// Move to end (most recently used)
+		const value = this.cache.get(key);
+		this.cache.delete(key);
+		this.cache.set(key, value);
+		return value;
+	}
+
+	set(key, value) {
+		if (this.cache.has(key)) {
+			// Update existing: move to end
+			this.cache.delete(key);
+		} else if (this.cache.size >= this.maxSize) {
+			// Remove least recently used (first item)
+			const firstKey = this.cache.keys().next().value;
+			this.cache.delete(firstKey);
+		}
+		// Add to end (most recently used)
+		this.cache.set(key, value);
+	}
+
+	has(key) {
+		return this.cache.has(key);
+	}
+
+	clear() {
+		this.cache.clear();
+	}
+
+	get size() {
+		return this.cache.size;
+	}
+}
+
 export default {
 	name: "vue-pivottable-ui",
 	props: {
@@ -167,6 +211,10 @@ export default {
 			isCalculating: false,
 			calculationError: null,
 			debounceTimer: null,
+			// LRU Cache for materialized input and attrValues (max 5 entries)
+			materializedDataCache: new LRUCache(5),
+			// LRU Cache for worker calculation results (max 5 entries)
+			workerResultCache: new LRUCache(5),
 			sortIcons: {
 				key_a_to_z: {
 					rowSymbol: "↕",
@@ -239,6 +287,10 @@ export default {
 	},
 	watch: {
 		data() {
+			// Clear caches when data changes (new dataset means old caches are invalid)
+			this.materializedDataCache.clear();
+			this.workerResultCache.clear();
+			
 			this.materializeInput(this.data);
 			this.propsData.vals = this.vals.slice();
 			this.propsData.rows = this.rows;
@@ -283,6 +335,10 @@ export default {
 		propUpdater(key) {
 			return (value) => {
 				this.propsData[key] = value;
+				// Clear worker cache when rowOrder or colOrder changes
+				if (key === 'rowOrder' || key === 'colOrder') {
+					this.clearWorkerCache();
+				}
 			};
 		},
 		normalizeAggregators(list = []) {
@@ -380,11 +436,13 @@ export default {
 
 			if (maxRequired === 0) {
 				this.propsData.vals = [];
+				this.clearWorkerCache();
 			} else {
 				// Use first aggregator's vals or create default
 				const firstAggregator = aggregatorList[0];
 				if (firstAggregator && this.propsData.aggregatorVals[firstAggregator]) {
 					this.propsData.vals = this.propsData.aggregatorVals[firstAggregator].slice();
+					this.clearWorkerCache();
 				} else {
 					const nextVals = this.propsData.vals.slice(0, maxRequired);
 					while (nextVals.length < maxRequired) {
@@ -393,6 +451,7 @@ export default {
 						nextVals.push(suggestion);
 					}
 					this.propsData.vals = nextVals;
+					this.clearWorkerCache();
 				}
 			}
 		},
@@ -409,6 +468,8 @@ export default {
 
 			if (!isSameOrder) {
 				this.propsData.aggregatorNames = normalized;
+				// Clear worker cache when aggregators change
+				this.clearWorkerCache();
 			}
 
 			this.propsData.aggregatorName = normalized[0];
@@ -462,6 +523,9 @@ export default {
 			if (typeof cur_list !== 'undefined' && cur_list) {
 				cur_list.pivot_value_filter = this.propsData.valueFilter;
 			}
+			// Clear worker cache when filters change
+			this.cachedWorkerResult = null;
+			this.cachedWorkerResultHash = null;
 			// Trigger pivot recalculation with debouncing
 			this.calculatePivot();
 		},
@@ -475,11 +539,64 @@ export default {
 			}
 			this.openStatus[attribute] = open;
 		},
+		// Generate a simple hash for cache key (fast hash function)
+		generateDataHash(data) {
+			if (!data || !Array.isArray(data)) {
+				return 'empty';
+			}
+			// Use data length and first/last record as quick identity check
+			// For more accuracy, could use a proper hash function, but this is faster
+			const dataLength = data.length;
+			const firstRecord = dataLength > 0 ? JSON.stringify(data[0]) : '';
+			const lastRecord = dataLength > 0 ? JSON.stringify(data[dataLength - 1]) : '';
+			// Include reference identity for same data object
+			return `${dataLength}_${firstRecord.substring(0, 50)}_${lastRecord.substring(0, 50)}_${data === this.data ? 'same' : 'diff'}`;
+		},
+		// Generate hash for worker configuration
+		generateWorkerConfigHash(config) {
+			// Create a hash from all configuration parameters
+			try {
+				return JSON.stringify({
+					dataLength: config.data?.length || 0,
+					rows: config.rows,
+					cols: config.cols,
+					vals: config.vals,
+					aggregatorNames: config.aggregatorNames,
+					aggregatorVals: config.aggregatorVals,
+					valueFilter: config.valueFilter,
+					rowOrder: config.rowOrder,
+					colOrder: config.colOrder
+				});
+			} catch (e) {
+				// Fallback to simple string if JSON.stringify fails
+				return `${config.data?.length || 0}_${config.rows?.join(',')}_${config.cols?.join(',')}_${config.aggregatorNames?.join(',')}`;
+			}
+		},
+		// Clear worker result cache when configuration changes
+		clearWorkerCache() {
+			this.workerResultCache.clear();
+		},
 		materializeInput(nextData) {
 			if (this.propsData.data === nextData) {
 				return;
 			}
 			this.propsData.data = nextData;
+			
+			// Check LRU cache for materialized input
+			const dataHash = this.generateDataHash(this.data);
+			const cachedData = this.materializedDataCache.get(dataHash);
+			if (cachedData) {
+				// Use cached materialized data
+				this.materializedInput.value = cachedData.materializedInput;
+				this.attrValues.value = cachedData.attrValues;
+				console.log(`[Cache] Using cached materialized input (${this.data.length} records, cache size: ${this.materializedDataCache.size})`);
+				// Trigger pivot recalculation after materialization
+				this.calculatePivot();
+				return;
+			}
+			
+			// Materialize input (expensive operation)
+			const materializeStartTime = performance.now();
 			const attrValues = {};
 			const materializedInput = [];
 			let recordsProcessed = 0;
@@ -506,8 +623,19 @@ export default {
 					recordsProcessed++;
 				}
 			);
+			const materializeEndTime = performance.now();
+			
+			// Update values
 			this.materializedInput.value = materializedInput;
 			this.attrValues.value = attrValues;
+			
+			// Cache the materialized data in LRU cache
+			this.materializedDataCache.set(dataHash, {
+				materializedInput: [...materializedInput], // Create a copy
+				attrValues: JSON.parse(JSON.stringify(attrValues)) // Deep copy
+			});
+			
+			console.log(`[Performance] Materialization: ${(materializeEndTime - materializeStartTime).toFixed(2)}ms for ${this.data.length} records`);
 			
 			// Trigger pivot recalculation after materialization
 			this.calculatePivot();
@@ -604,11 +732,28 @@ export default {
 						colOrder: this.propsData.colOrder
 					};
 
+					// Check LRU cache for worker result
+					const configHash = this.generateWorkerConfigHash(config);
+					const cachedResult = this.workerResultCache.get(configHash);
+					if (cachedResult) {
+						// Use cached worker result
+						console.log(`[Cache] Using cached worker result (${this.data.length} records, cache size: ${this.workerResultCache.size})`);
+						
+						if (this.pivotResult) {
+							this.pivotResult.value = cachedResult;
+						}
+						this.isCalculating = false;
+						return;
+					}
+
 					const calcStartTime = performance.now();
 					const result = await pivotWorkerManager.calculatePivot(config);
 					const calcEndTime = performance.now();
 					
 					console.log(`[Performance] Worker Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
+					
+					// Cache the worker result in LRU cache
+					this.workerResultCache.set(configHash, JSON.parse(JSON.stringify(result))); // Deep copy
 					
 					if (this.pivotResult) {
 						this.pivotResult.value = result;
@@ -1023,9 +1168,11 @@ export default {
 				}
 				if (e.from.classList.contains("pvtCols")) {
 					this.propsData.cols.splice(e.oldIndex, 1);
+					this.clearWorkerCache();
 				}
 				if (e.to.classList.contains("pvtCols")) {
 					this.propsData.cols.splice(e.newIndex, 0, item);
+					this.clearWorkerCache();
 				}
 			},
 			"pvtAxisContainer pvtHorizList pvtCols",
@@ -1044,9 +1191,11 @@ export default {
 				}
 				if (e.from.classList.contains("pvtRows")) {
 					this.propsData.rows.splice(e.oldIndex, 1);
+					this.clearWorkerCache();
 				}
 				if (e.to.classList.contains("pvtRows")) {
 					this.propsData.rows.splice(e.newIndex, 0, item);
+					this.clearWorkerCache();
 				}
 			},
 			"pvtAxisContainer pvtVertList pvtRows",
