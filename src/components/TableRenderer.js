@@ -1246,50 +1246,250 @@ const XLSXExportRenderer = {
 	},
 	render() {
 		const pivotData = new PivotData(this.$props);
-		const rowKeys = pivotData.getRowKeys();
-		const colKeys = pivotData.getColKeys();
+		let rowKeys = pivotData.getRowKeys();
+		let colKeys = pivotData.getColKeys();
 
-		if (rowKeys.length === 0) {
-			rowKeys.push([]);
-		}
-		if (colKeys.length === 0) {
-			colKeys.push([]);
-		}
+		// Filter out rows and columns where any header value is "null" (same as table renderer)
+		const filteredRowKeys = rowKeys.filter((rowKey) => {
+			// Exclude rows where any part of the rowKey is "null"
+			// Empty arrays are allowed (for grand totals)
+			if (!Array.isArray(rowKey) || rowKey.length === 0) return true;
+			return !rowKey.some((val) => val === "null" || val === null);
+		});
+		
+		const filteredColKeys = colKeys.filter((colKey) => {
+			// Exclude columns where any part of the colKey is "null"
+			// Empty arrays are allowed (for grand totals)
+			if (!Array.isArray(colKey) || colKey.length === 0) return true;
+			return !colKey.some((val) => val === "null" || val === null);
+		});
 
-		const rows = Array.from(pivotData.props.rows)
-		const cols = Array.from(pivotData.props.cols)
+		// Use filtered keys, but ensure at least one empty array if all are filtered
+		rowKeys = filteredRowKeys.length ? filteredRowKeys : [[]];
+		colKeys = filteredColKeys.length ? filteredColKeys : [[]];
 
-		const format_data = []
+		// Get aggregator names and props (same as table renderer)
+		const aggregatorNames = pivotData.getAggregatorNames() || [];
+		const aggregatorCount = aggregatorNames.length;
+		const aggregatorVals = this.aggregatorVals || {};
+		const rowAttrs = Array.from(pivotData.props.rows || []);
+		const colAttrs = Array.from(pivotData.props.cols || []);
 
-		cols.forEach(col => format_data.push([col]))
-		rows.forEach(row => format_data.forEach(col => col.unshift('')))
-
-		for (let i = 0; i < colKeys.length; i++) {
-			for (let j = 0; j < cols.length; j++) {
-				format_data[j].push(colKeys[i][j])
+		// Helper function to format aggregator name with value field (same as table renderer)
+		const formatAggregatorHeader = (aggName) => {
+			const vals = aggregatorVals[aggName];
+			if (vals && Array.isArray(vals) && vals.length > 0 && vals[0]) {
+				if (aggName === "Count" || aggName === __("Count")) {
+					return `${aggName} of ${vals[0]}`;
+				} else {
+					return `${aggName}(${vals[0]})`;
+				}
 			}
+			return aggName;
+		};
+
+		// Build column descriptors (same logic as table renderer)
+		const effectiveColKeys = aggregatorCount > 1
+			? colKeys.flatMap((colKey) =>
+					aggregatorNames.map((aggName) => [...colKey, aggName])
+			  )
+			: colKeys.map((colKey) =>
+					colKey.length === 0 ? [aggregatorNames[0]] : colKey
+			  );
+
+		let columnDescriptors = aggregatorCount > 1
+			? colKeys.flatMap((colKey) =>
+					aggregatorNames.map((aggName) => ({
+						colKey,
+						aggregatorName: aggName,
+					}))
+			  )
+			: colKeys.map((colKey) => ({
+					colKey,
+					aggregatorName: aggregatorNames[0],
+			  }));
+
+		// When there are no horizontal header fields, remove the rightmost columns equal to the number of aggregators
+		if (colAttrs.length === 0 && columnDescriptors.length >= aggregatorCount) {
+			columnDescriptors = columnDescriptors.slice(0, -aggregatorCount);
 		}
 
-		const format_rows = rows
+		const headerColAttrs = aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
 
-		for (let i = 0; i < colKeys.length + 1; i++) {
-			format_rows.push('')
-		}
+		// Build export data array
+		const format_data = [];
 
-		format_data.push(format_rows)
-
-		const datas = rowKeys.map((r) => {
-			const row = r.map((x) => x);
-			if (cols.length) row.push('')
-
-			colKeys.map((c) => {
-				const v = pivotData.getAggregator(r, c).value();
-				row.push(v || "");
+		// Build header rows (matching table structure)
+		headerColAttrs.forEach((attr, attrIndex) => {
+			const headerRow = [];
+			
+			// Add empty cells for row attributes
+			rowAttrs.forEach(() => {
+				headerRow.push('');
 			});
+
+			// Add column attribute header
+			if (attrIndex < colAttrs.length) {
+				headerRow.push(attr);
+			} else if (attr === __("Values")) {
+				headerRow.push(attr);
+			}
+
+			// Add column keys and aggregator names
+			effectiveColKeys.forEach((colKey) => {
+				const cellValue = colKey[attrIndex] != null ? colKey[attrIndex] : "";
+				// Format aggregator name in "Values" row
+				if (attrIndex === headerColAttrs.length - 1 && attr === __("Values") && aggregatorCount > 1) {
+					const aggName = cellValue;
+					if (aggName && aggregatorNames.includes(aggName)) {
+						headerRow.push(formatAggregatorHeader(aggName));
+					} else {
+						headerRow.push(cellValue);
+					}
+				} else {
+					headerRow.push(cellValue);
+				}
+			});
+
+			// Add "Totals" header if row totals are enabled
+			if (this.rowTotal && aggregatorCount > 0) {
+				if (attrIndex === headerColAttrs.length - 1) {
+					if (aggregatorCount > 1) {
+						aggregatorNames.forEach((aggName) => {
+							headerRow.push(formatAggregatorHeader(aggName));
+						});
+					} else {
+						headerRow.push(__("Totals"));
+					}
+				} else if (attrIndex === 0 && headerColAttrs.length > 1) {
+					headerRow.push(__("Totals"));
+				}
+			}
+
+			format_data.push(headerRow);
+		});
+
+		// Build data rows
+		const datas = rowKeys.map((rowKey) => {
+			const row = [];
+			
+			// Add row attribute values
+			rowKey.forEach((txt) => {
+				row.push(txt);
+			});
+
+			// Add empty cell if there are column attributes
+			if (colAttrs.length > 0) {
+				row.push('');
+			}
+
+			// Add data cells for each column descriptor
+			columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+				const aggregator = pivotData.getAggregator(rowKey, colKey, aggregatorName);
+				let value = null;
+				if (aggregator && typeof aggregator.value === "function") {
+					value = aggregator.value();
+				}
+				// Format the value (use formatted if available, otherwise raw value)
+				let formatted = '';
+				if (value !== null && value !== undefined) {
+					if (aggregator && typeof aggregator.format === "function") {
+						formatted = aggregator.format(value);
+					} else {
+						formatted = String(value);
+					}
+				}
+				row.push(formatted);
+			});
+
+			// Add row totals if enabled
+			if (this.rowTotal) {
+				aggregatorNames.forEach((aggName) => {
+					const totalAggregator = pivotData.getAggregator(rowKey, [], aggName);
+					let totalValue = null;
+					if (totalAggregator && typeof totalAggregator.value === "function") {
+						totalValue = totalAggregator.value();
+					}
+					let totalFormatted = '';
+					if (totalValue !== null && totalValue !== undefined) {
+						if (totalAggregator && typeof totalAggregator.format === "function") {
+							totalFormatted = totalAggregator.format(totalValue);
+						} else {
+							totalFormatted = String(totalValue);
+						}
+					}
+					row.push(totalFormatted);
+				});
+			}
+
 			return row;
 		});
 
-		datas.forEach(data => format_data.push(data))
+		// Add data rows to format_data
+		datas.forEach(data => format_data.push(data));
+
+		// Add column totals row if enabled
+		if (this.colTotal) {
+			const totalRow = [];
+			
+			// Add "Totals" label
+			const labelColSpan = rowAttrs.length + (headerColAttrs.length > 0 ? 1 : 0);
+			if (labelColSpan > 0 && headerColAttrs.length) {
+				totalRow.push(__("Totals"));
+				// Fill remaining label columns
+				for (let i = 1; i < labelColSpan; i++) {
+					totalRow.push('');
+				}
+			} else {
+				// No column attributes case
+				rowAttrs.forEach(() => {
+					totalRow.push('');
+				});
+				if (rowAttrs.length > 0 || headerColAttrs.length > 0) {
+					totalRow.push(__("Totals"));
+				}
+			}
+
+			// Add column totals for each column descriptor
+			columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+				const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
+				let totalValue = null;
+				if (totalAggregator && typeof totalAggregator.value === "function") {
+					totalValue = totalAggregator.value();
+				}
+				let totalFormatted = '';
+				if (totalValue !== null && totalValue !== undefined) {
+					if (totalAggregator && typeof totalAggregator.format === "function") {
+						totalFormatted = totalAggregator.format(totalValue);
+					} else {
+						totalFormatted = String(totalValue);
+					}
+				}
+				totalRow.push(totalFormatted);
+			});
+
+			// Add grand total if row totals are enabled
+			if (this.rowTotal) {
+				aggregatorNames.forEach((aggName) => {
+					const grandAggregator = pivotData.getAggregator([], [], aggName);
+					let grandValue = null;
+					if (grandAggregator && typeof grandAggregator.value === "function") {
+						grandValue = grandAggregator.value();
+					}
+					let grandFormatted = '';
+					if (grandValue !== null && grandValue !== undefined) {
+						if (grandAggregator && typeof grandAggregator.format === "function") {
+							grandFormatted = grandAggregator.format(grandValue);
+						} else {
+							grandFormatted = String(grandValue);
+						}
+					}
+					totalRow.push(grandFormatted);
+				});
+			}
+
+			format_data.push(totalRow);
+		}
 
 		console.log(format_data);
 
