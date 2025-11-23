@@ -21,7 +21,20 @@ export default defineConfig(({ command, mode }) => {
 			},
 			server: {
 				port: 5173,
-				open: true
+				open: true,
+				// Enable HMR for all file types
+				hmr: {
+					overlay: true
+				},
+				// Watch for changes in all files
+				watch: {
+					usePolling: false,
+					interval: 100
+				}
+			},
+			// Optimize dependencies to improve HMR
+			optimizeDeps: {
+				include: ['vue', 'vuedraggable']
 			}
 		};
 	}

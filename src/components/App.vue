@@ -79,8 +79,18 @@ export default {
 		const currentData = ref(generateLargeDataset(150000));
 		
 		const generateData = () => {
-			const count = Math.max(1, Math.min(100000, datasetCount.value || 100));
+			const count = Math.max(1, Math.min(150000, datasetCount.value || 100));
+			
+			// Measure dataset generation time
+			const genStartTime = performance.now();
 			currentData.value = generateLargeDataset(count);
+			const genEndTime = performance.now();
+			const genDuration = genEndTime - genStartTime;
+			
+			console.log(`\n========== Performance Metrics ==========`);
+			console.log(`[Performance] Dataset Generation: ${genDuration.toFixed(2)}ms for ${count} records`);
+			console.log(`[Performance] Generation Rate: ${(count / genDuration * 1000).toFixed(0)} records/sec`);
+			console.log(`==========================================\n`);
 		};
 		
 		return {

@@ -5,8 +5,12 @@ import Pivottable from "./Pivottable.js";
 import { PivotData, getSort, aggregators, sortAs } from "../utils/utils.js";
 import draggable from "vuedraggable";
 import TableRenderer from "./TableRenderer.js";
-import { h } from "vue";
+import { h, shallowRef, computed, watch, nextTick, onUnmounted } from "vue";
+import { pivotWorkerManager } from "../utils/pivotWorkerManager.js";
 import "../styles/pivottable.css";
+
+// Threshold for using Web Worker (records count)
+const WORKER_THRESHOLD = 10000;
 
 export default {
 	name: "vue-pivottable-ui",
@@ -45,7 +49,12 @@ export default {
 			type: Number,
 			default: 500,
 		},
-		...common.props,
+		// Spread common props but exclude internal state props that are defined in data()
+		...Object.fromEntries(
+			Object.entries(common.props).filter(([key]) => 
+				!['pivotResult', 'usePreCalculatedResult', 'isCalculating', 'calculationError'].includes(key)
+			)
+		),
 	},
 	computed: {
 		renderers() {
@@ -149,6 +158,11 @@ export default {
 			maxZIndex: 1000,
 			openDropdown: false,
 			materializedInput: [],
+			// Performance optimization: use shallowRef for large pivot results
+			pivotResult: shallowRef(null),
+			isCalculating: false,
+			calculationError: null,
+			debounceTimer: null,
 			sortIcons: {
 				key_a_to_z: {
 					rowSymbol: "↕",
@@ -210,6 +224,14 @@ export default {
 		this.unusedOrder = this.unusedAttrs;
 		Object.keys(this.attrValues).map(this.assignValue);
 		Object.keys(this.openStatus).map(this.assignValue);
+		// Initial pivot calculation - don't debounce on mount
+		this.calculatePivot(true);
+	},
+	beforeUnmount() {
+		// Clean up debounce timer
+		if (this.debounceTimer) {
+			clearTimeout(this.debounceTimer);
+		}
 	},
 	watch: {
 		data() {
@@ -387,6 +409,8 @@ export default {
 
 			this.propsData.aggregatorName = normalized[0];
 			this.ensureValSlots(normalized);
+			// Trigger pivot recalculation with debouncing
+			this.calculatePivot();
 		},
 		addAggregator() {
 			const current = this.selectedAggregators.slice();
@@ -434,6 +458,8 @@ export default {
 			if (typeof cur_list !== 'undefined' && cur_list) {
 				cur_list.pivot_value_filter = this.propsData.valueFilter;
 			}
+			// Trigger pivot recalculation with debouncing
+			this.calculatePivot();
 		},
 		moveFilterBoxToTop({ attribute }) {
 			this.maxZIndex += 1;
@@ -478,6 +504,219 @@ export default {
 			);
 			this.materializedInput = materializedInput;
 			this.attrValues = attrValues;
+			
+			// Trigger pivot recalculation after materialization
+			this.calculatePivot();
+		},
+		calculatePivot(isInitial = false) {
+			// For initial calculation, don't debounce - start immediately
+			// For subsequent changes, debounce to avoid excessive worker calls
+			if (isInitial) {
+				// Clear any existing timer
+				if (this.debounceTimer) {
+					clearTimeout(this.debounceTimer);
+					this.debounceTimer = null;
+				}
+				// Start calculation immediately and set calculating state
+				this.performPivotCalculation();
+			} else {
+				// Debounce subsequent calculations
+				if (this.debounceTimer) {
+					clearTimeout(this.debounceTimer);
+				}
+
+				// Set calculating state immediately if we're going to use worker
+				// This ensures TableRenderer shows "Calculating..." even during debounce
+				if (Array.isArray(this.data) && this.data.length >= WORKER_THRESHOLD) {
+					const hasFunctionDerivedAttrs = Object.keys(this.derivedAttributes || {}).length > 0 && 
+						Object.values(this.derivedAttributes || {}).some(attr => typeof attr === 'function');
+					const hasFunctionSorters = Object.keys(this.sorters || {}).length > 0 && 
+						Object.values(this.sorters || {}).some(sorter => typeof sorter === 'function');
+					
+					if (pivotWorkerManager.isAvailable() && !hasFunctionDerivedAttrs && !hasFunctionSorters) {
+						this.isCalculating = true;
+					}
+				}
+
+				this.debounceTimer = setTimeout(async () => {
+					await this.performPivotCalculation();
+				}, 150); // 150ms debounce
+			}
+		},
+		async performPivotCalculation() {
+			if (!Array.isArray(this.data) || this.data.length === 0) {
+				if (this.pivotResult) {
+					this.pivotResult.value = null;
+				}
+				return;
+			}
+
+			// Check if we have non-serializable objects (functions in derivedAttributes or sorters)
+			const hasFunctionDerivedAttrs = Object.keys(this.derivedAttributes || {}).length > 0 && 
+				Object.values(this.derivedAttributes || {}).some(attr => typeof attr === 'function');
+			const hasFunctionSorters = Object.keys(this.sorters || {}).length > 0 && 
+				Object.values(this.sorters || {}).some(sorter => typeof sorter === 'function');
+
+			// Use Web Worker if available, dataset is large, and no function-based derived attributes or sorters
+			const shouldUseWorker = pivotWorkerManager.isAvailable() && 
+				this.data.length >= WORKER_THRESHOLD && 
+				!hasFunctionDerivedAttrs && 
+				!hasFunctionSorters;
+
+			if (shouldUseWorker) {
+				this.isCalculating = true;
+				this.calculationError = null;
+
+				try {
+					// Deep serialize all data to ensure Vue reactive proxies are converted to plain objects
+					const serializeForWorker = (obj) => {
+						try {
+							return JSON.parse(JSON.stringify(obj));
+						} catch (e) {
+							// If serialization fails, return empty/default value
+							if (Array.isArray(obj)) return [];
+							if (typeof obj === 'object' && obj !== null) return {};
+							return obj;
+						}
+					};
+
+					// Convert Vue reactive proxies to plain objects for serialization
+					const dataToSend = this.materializedInput.length > 0 
+						? serializeForWorker(this.materializedInput)
+						: serializeForWorker(this.data);
+
+					// Serialize the entire config object
+					const config = {
+						data: dataToSend,
+						rows: serializeForWorker(this.propsData.rows),
+						cols: serializeForWorker(this.propsData.cols),
+						vals: serializeForWorker(this.propsData.vals),
+						aggregatorNames: serializeForWorker(this.propsData.aggregatorNames),
+						aggregatorVals: serializeForWorker(this.propsData.aggregatorVals),
+						valueFilter: serializeForWorker(this.propsData.valueFilter),
+						derivedAttributes: {}, // Empty - functions can't be serialized
+						sorters: {}, // Empty - functions can't be serialized
+						rowOrder: this.propsData.rowOrder,
+						colOrder: this.propsData.colOrder
+					};
+
+					const calcStartTime = performance.now();
+					const result = await pivotWorkerManager.calculatePivot(config);
+					const calcEndTime = performance.now();
+					
+					console.log(`[Performance] Worker Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
+					
+					if (this.pivotResult) {
+						this.pivotResult.value = result;
+					}
+				} catch (error) {
+					console.error('Worker calculation error, falling back to sync:', error);
+					this.calculationError = error;
+					// Fallback to synchronous calculation
+					this.performPivotCalculationSync();
+				} finally {
+					this.isCalculating = false;
+				}
+			} else {
+				// For small datasets, don't use pivotResult - TableRenderer will create pivotData directly
+				// Clear any existing pivotResult from previous large dataset calculations
+				if (this.pivotResult) {
+					this.pivotResult.value = null;
+				}
+				// TableRenderer will handle synchronous calculation in its render function
+				// No need to pre-calculate here
+			}
+		},
+		performPivotCalculationSync() {
+			try {
+				const calcStartTime = performance.now();
+				const pivotData = new PivotData({
+					data: this.materializedInput.length > 0 ? this.materializedInput : this.data,
+					rows: this.propsData.rows,
+					cols: this.propsData.cols,
+					vals: this.propsData.vals,
+					aggregatorNames: this.propsData.aggregatorNames,
+					aggregators: aggregators,
+					aggregatorVals: this.propsData.aggregatorVals,
+					valueFilter: this.propsData.valueFilter,
+					derivedAttributes: this.derivedAttributes,
+					sorters: this.sorters,
+					rowOrder: this.propsData.rowOrder,
+					colOrder: this.propsData.colOrder
+				});
+				const calcEndTime = performance.now();
+				
+				console.log(`[Performance] Sync Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
+
+				// Convert to same format as worker result
+				const rowKeys = pivotData.getRowKeys();
+				const colKeys = pivotData.getColKeys();
+				const aggregatorNamesList = pivotData.getAggregatorNames();
+
+				const result = {
+					rowKeys,
+					colKeys,
+					aggregatorNames: aggregatorNamesList,
+					tree: {},
+					rowTotals: {},
+					colTotals: {},
+					allTotal: {}
+				};
+
+				// Build result structure (same as worker)
+				for (const rowKey of rowKeys) {
+					const flatRowKey = rowKey.join(String.fromCharCode(0));
+					result.tree[flatRowKey] = {};
+					for (const colKey of colKeys) {
+						const flatColKey = colKey.join(String.fromCharCode(0));
+						result.tree[flatRowKey][flatColKey] = {};
+						for (const aggName of aggregatorNamesList) {
+							const aggregator = pivotData.getAggregator(rowKey, colKey, aggName);
+							const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
+							const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
+							result.tree[flatRowKey][flatColKey][aggName] = { value, formatted };
+						}
+					}
+				}
+
+				for (const rowKey of rowKeys) {
+					const flatRowKey = rowKey.join(String.fromCharCode(0));
+					result.rowTotals[flatRowKey] = {};
+					for (const aggName of aggregatorNamesList) {
+						const aggregator = pivotData.getAggregator(rowKey, [], aggName);
+						const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
+						const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
+						result.rowTotals[flatRowKey][aggName] = { value, formatted };
+					}
+				}
+
+				for (const colKey of colKeys) {
+					const flatColKey = colKey.join(String.fromCharCode(0));
+					result.colTotals[flatColKey] = {};
+					for (const aggName of aggregatorNamesList) {
+						const aggregator = pivotData.getAggregator([], colKey, aggName);
+						const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
+						const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
+						result.colTotals[flatColKey][aggName] = { value, formatted };
+					}
+				}
+
+				result.allTotal = {};
+				for (const aggName of aggregatorNamesList) {
+					const aggregator = pivotData.getAggregator([], [], aggName);
+					const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
+					const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
+					result.allTotal[aggName] = { value, formatted };
+				}
+
+				this.pivotResult.value = result;
+			} catch (error) {
+				console.error('Synchronous pivot calculation error:', error);
+				this.calculationError = error;
+				if (this.pivotResult) {
+					this.pivotResult.value = null;
+				}
+			}
 		},
 		makeDnDCell(items, onChange, classes) {
 			return h(
@@ -736,6 +975,7 @@ export default {
 	},
 	render() {
 		if (this.data.length < 1) return;
+		console.log(this.propsData, 'this props data ++++++++++');
 		const rendererName = this.propsData.rendererName || this.rendererName;
 		const aggregatorName =
 			this.selectedAggregators[0] ||
@@ -821,6 +1061,27 @@ export default {
 			aggregatorNames,
 			vals,
 			aggregatorVals: this.propsData.aggregatorVals, // Pass per-aggregator vals
+			// Pass pre-calculated pivot result from worker (only when worker was used)
+			pivotResult: this.pivotResult ? this.pivotResult.value : null,
+			// usePreCalculatedResult should be true when we actually INTEND to use worker
+			// (same conditions as performPivotCalculation uses to decide)
+			usePreCalculatedResult: (() => {
+				if (!Array.isArray(this.data) || this.data.length < WORKER_THRESHOLD) {
+					return false;
+				}
+				// Check if we have non-serializable objects (functions in derivedAttributes or sorters)
+				const hasFunctionDerivedAttrs = Object.keys(this.derivedAttributes || {}).length > 0 && 
+					Object.values(this.derivedAttributes || {}).some(attr => typeof attr === 'function');
+				const hasFunctionSorters = Object.keys(this.sorters || {}).length > 0 && 
+					Object.values(this.sorters || {}).some(sorter => typeof sorter === 'function');
+				
+				// Use same logic as performPivotCalculation to determine if we should use worker
+				return pivotWorkerManager.isAvailable() && 
+					!hasFunctionDerivedAttrs && 
+					!hasFunctionSorters;
+			})(),
+			isCalculating: this.isCalculating,
+			calculationError: this.calculationError,
 		};
 
 		const rendererCell = this.rendererCell(rendererName);

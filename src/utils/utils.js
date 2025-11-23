@@ -26,6 +26,16 @@ const addSeparators = function (nStr, thousandsSep, decimalSep) {
 };
 
 const getFormatOptionsFromFrappe = () => {
+	// Web Workers don't have access to window object
+	if (typeof window === 'undefined' || !window.get_number_format || !window.get_number_format_info) {
+		// Return default format options for worker context or when window functions are unavailable
+		return {
+			thousandsSep: ',',
+			decimalSep: '.',
+			digitsAfterDecimal: 2,
+		};
+	}
+	
 	const format = window.get_number_format();
 	const format_info = window.get_number_format_info(format)
 
@@ -769,17 +779,24 @@ class PivotData {
 	}
 
 	processRecord(record) {
-		// this code is called in a tight loop
+		// this code is called in a tight loop - optimize for performance
+		const cols = this.props.cols;
+		const rows = this.props.rows;
 		const colKey = [];
 		const rowKey = [];
-		for (const x of Array.from(this.props.cols)) {
+		const separator = String.fromCharCode(0);
+		
+		// Optimize: use for loops instead of Array.from for better performance
+		for (let i = 0, len = cols.length; i < len; i++) {
+			const x = cols[i];
 			colKey.push(x in record ? record[x] : "null");
 		}
-		for (const x of Array.from(this.props.rows)) {
+		for (let i = 0, len = rows.length; i < len; i++) {
+			const x = rows[i];
 			rowKey.push(x in record ? record[x] : "null");
 		}
-		const flatRowKey = rowKey.join(String.fromCharCode(0));
-		const flatColKey = colKey.join(String.fromCharCode(0));
+		const flatRowKey = rowKey.join(separator);
+		const flatColKey = colKey.join(separator);
 
 		this.pushRecord(this.allTotal, record);
 

@@ -93,5 +93,22 @@ export default {
 				return {};
 			},
 		},
+		// Add these new props for Web Worker support
+		pivotResult: {
+			type: Object,
+			default: null,
+		},
+		usePreCalculatedResult: {
+			type: Boolean,
+			default: false,
+		},
+		isCalculating: {
+			type: Boolean,
+			default: false,
+		},
+		calculationError: {
+			type: [Error, String, null],
+			default: null,
+		},
 	},
 };
