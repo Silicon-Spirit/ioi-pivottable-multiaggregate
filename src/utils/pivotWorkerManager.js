@@ -88,6 +88,15 @@ class PivotWorkerManager {
 			return;
 		}
 
+		if (type === 'CHART_DATA_OPTIMIZED') {
+			const request = this.pendingRequests.get(id);
+			if (request) {
+				request.resolve(e.data.chartData);
+				this.pendingRequests.delete(id);
+			}
+			return;
+		}
+
 		// Unknown message type
 		console.warn('[PivotWorkerManager] Received unknown message type:', type);
 	}
@@ -223,6 +232,77 @@ class PivotWorkerManager {
 			request.reject(new Error('Request cancelled'));
 		}
 		this.pendingRequests.clear();
+	}
+
+	/**
+	 * Optimize chart data using LTTB in Web Worker
+	 * @param {Object} chartData - Chart data object with labels and datasets
+	 * @param {String} chartType - Chart type ('line' or 'bar')
+	 * @param {Number} lttbThreshold - Maximum number of data points (default: 500)
+	 * @returns {Promise<Object>} Promise that resolves with optimized chart data
+	 */
+	optimizeChartData(chartData, chartType, lttbThreshold = 500) {
+		return new Promise((resolve, reject) => {
+			// Ensure worker is initialized
+			if (!this.isInitialized) {
+				const initSuccess = this.init();
+				if (!initSuccess) {
+					reject(new Error('Worker initialization failed'));
+					return;
+				}
+			}
+
+			if (!this.worker) {
+				reject(new Error('Worker not available'));
+				return;
+			}
+
+			// Generate unique request ID
+			const id = ++this.requestId;
+			
+			// Store request for later resolution
+			this.pendingRequests.set(id, { resolve, reject });
+
+			// Set timeout for request (10 seconds)
+			const timeoutId = setTimeout(() => {
+				if (this.pendingRequests.has(id)) {
+					this.pendingRequests.delete(id);
+					reject(new Error('Chart optimization timeout after 10 seconds'));
+				}
+			}, 10000);
+
+			// Override reject to clear timeout
+			const originalReject = reject;
+			this.pendingRequests.get(id).reject = (error) => {
+				clearTimeout(timeoutId);
+				originalReject(error);
+			};
+
+			// Override resolve to clear timeout
+			const originalResolve = resolve;
+			this.pendingRequests.get(id).resolve = (result) => {
+				clearTimeout(timeoutId);
+				originalResolve(result);
+			};
+
+			try {
+				// Send optimization request to worker
+				this.worker.postMessage({
+					id,
+					type: 'OPTIMIZE_CHART_DATA',
+					payload: {
+						chartData,
+						chartType,
+						lttbThreshold
+					}
+				});
+			} catch (error) {
+				// If postMessage fails, clean up and reject
+				clearTimeout(timeoutId);
+				this.pendingRequests.delete(id);
+				reject(new Error(`Failed to send message to worker: ${error.message}`));
+			}
+		});
 	}
 }
 

@@ -388,7 +388,28 @@ export default {
 				if (!aggregators[name]) {
 					return;
 				}
-				const numInputs = aggregators[name]([])().numInputs || 0;
+				// Check numInputs properly for aggregators that require multiple inputs
+				let numInputs = 0;
+				try {
+					// Check with 2 undefined values (for "Sum over Sum" type aggregators)
+					const testWith2 = aggregators[name]([undefined, undefined])().numInputs;
+					if (testWith2 === 2) {
+						numInputs = 2;
+					} else {
+						// Check with 1 undefined value (for single-input aggregators)
+						const testWith1 = aggregators[name]([undefined])().numInputs;
+						if (testWith1 === 1) {
+							numInputs = 1;
+						} else {
+							// Check with empty array (for no-input aggregators like Count)
+							const testWith0 = aggregators[name]([])().numInputs || 0;
+							numInputs = testWith0;
+						}
+					}
+				} catch (e) {
+					// Fallback: try with empty array
+					numInputs = aggregators[name]([])().numInputs || 0;
+				}
 				// Always ensure at least one value slot, even if numInputs is 0 (like Count)
 				const minInputs = numInputs > 0 ? numInputs : 1;
 				
@@ -752,6 +773,129 @@ export default {
 					
 					console.log(`[Performance] Worker Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
 					
+					// Apply Top-N filtering after pivot calculation
+					const topNThreshold = 50; // Default threshold
+					const enableTopN = true; // Always enable Top-N
+					
+					if (enableTopN && result.rowKeys && result.rowKeys.length > topNThreshold) {
+						// Calculate aggregated values for each row to determine top N
+						const rowValues = result.rowKeys.map((rowKey, index) => {
+							const flatRowKey = rowKey.join(String.fromCharCode(0));
+							let aggregatedValue = 0;
+							let count = 0;
+							
+							// Sum values across all columns and aggregators for this row
+							for (const colKey of result.colKeys) {
+								const flatColKey = colKey.join(String.fromCharCode(0));
+								if (result.tree[flatRowKey] && result.tree[flatRowKey][flatColKey]) {
+									for (const aggName of result.aggregatorNames) {
+										const cellData = result.tree[flatRowKey][flatColKey][aggName];
+										if (cellData && cellData.value !== null && cellData.value !== undefined) {
+											aggregatedValue += typeof cellData.value === 'number' 
+												? cellData.value 
+												: (parseFloat(cellData.value) || 0);
+											count++;
+										}
+									}
+								}
+							}
+							
+							return {
+								rowKey,
+								value: aggregatedValue,
+								index
+							};
+						});
+						
+						// Sort by value descending and take top N
+						rowValues.sort((a, b) => b.value - a.value);
+						const topNRowIndices = new Set(rowValues.slice(0, topNThreshold).map(item => item.index));
+						
+						// Filter rowKeys and rebuild tree
+						result.rowKeys = result.rowKeys.filter((_, index) => topNRowIndices.has(index));
+						
+						// Rebuild tree with only top N rows
+						const newTree = {};
+						for (const rowKey of result.rowKeys) {
+							const flatRowKey = rowKey.join(String.fromCharCode(0));
+							newTree[flatRowKey] = result.tree[flatRowKey] || {};
+						}
+						result.tree = newTree;
+						
+						// Rebuild rowTotals
+						const newRowTotals = {};
+						for (const rowKey of result.rowKeys) {
+							const flatRowKey = rowKey.join(String.fromCharCode(0));
+							if (result.rowTotals[flatRowKey]) {
+								newRowTotals[flatRowKey] = result.rowTotals[flatRowKey];
+							}
+						}
+						result.rowTotals = newRowTotals;
+					}
+					
+					// Apply Top-N to columns if needed
+					if (enableTopN && result.colKeys && result.colKeys.length > topNThreshold) {
+						// Calculate aggregated values for each column
+						const colValues = result.colKeys.map((colKey, index) => {
+							const flatColKey = colKey.join(String.fromCharCode(0));
+							let aggregatedValue = 0;
+							let count = 0;
+							
+							// Sum values across all rows and aggregators for this column
+							for (const rowKey of result.rowKeys) {
+								const flatRowKey = rowKey.join(String.fromCharCode(0));
+								if (result.tree[flatRowKey] && result.tree[flatRowKey][flatColKey]) {
+									for (const aggName of result.aggregatorNames) {
+										const cellData = result.tree[flatRowKey][flatColKey][aggName];
+										if (cellData && cellData.value !== null && cellData.value !== undefined) {
+											aggregatedValue += typeof cellData.value === 'number' 
+												? cellData.value 
+												: (parseFloat(cellData.value) || 0);
+											count++;
+										}
+									}
+								}
+							}
+							
+							return {
+								colKey,
+								value: aggregatedValue,
+								index
+							};
+						});
+						
+						// Sort by value descending and take top N
+						colValues.sort((a, b) => b.value - a.value);
+						const topNColIndices = new Set(colValues.slice(0, topNThreshold).map(item => item.index));
+						
+						// Filter colKeys
+						result.colKeys = result.colKeys.filter((_, index) => topNColIndices.has(index));
+						
+						// Rebuild tree with only top N columns
+						const newTree = {};
+						for (const rowKey of result.rowKeys) {
+							const flatRowKey = rowKey.join(String.fromCharCode(0));
+							newTree[flatRowKey] = {};
+							for (const colKey of result.colKeys) {
+								const flatColKey = colKey.join(String.fromCharCode(0));
+								if (result.tree[flatRowKey] && result.tree[flatRowKey][flatColKey]) {
+									newTree[flatRowKey][flatColKey] = result.tree[flatRowKey][flatColKey];
+								}
+							}
+						}
+						result.tree = newTree;
+						
+						// Rebuild colTotals
+						const newColTotals = {};
+						for (const colKey of result.colKeys) {
+							const flatColKey = colKey.join(String.fromCharCode(0));
+							if (result.colTotals[flatColKey]) {
+								newColTotals[flatColKey] = result.colTotals[flatColKey];
+							}
+						}
+						result.colTotals = newColTotals;
+					}
+					
 					// Cache the worker result in LRU cache
 					this.workerResultCache.set(configHash, JSON.parse(JSON.stringify(result))); // Deep copy
 					
@@ -951,7 +1095,32 @@ export default {
 								{ class: ["pvtAggregatorList"] },
 								this.selectedAggregators.map((name, index) => {
 									const aggregator = aggregators[name];
-									const numInputs = aggregator ? (aggregator([])().numInputs || 0) : 0;
+									// For aggregators that require multiple inputs (like "Sum over Sum"),
+									// we need to check numInputs by passing undefined values
+									// Try with 2 undefined values first (for aggregators like "Sum over Sum")
+									let numInputs = 0;
+									if (aggregator) {
+										try {
+											// Check with 2 undefined values (for "Sum over Sum" type aggregators)
+											const testWith2 = aggregator([undefined, undefined])().numInputs;
+											if (testWith2 === 2) {
+												numInputs = 2;
+											} else {
+												// Check with 1 undefined value (for single-input aggregators)
+												const testWith1 = aggregator([undefined])().numInputs;
+												if (testWith1 === 1) {
+													numInputs = 1;
+												} else {
+													// Check with empty array (for no-input aggregators like Count)
+													const testWith0 = aggregator([])().numInputs || 0;
+													numInputs = testWith0;
+												}
+											}
+										} catch (e) {
+											// Fallback: try with empty array
+											numInputs = aggregator([])().numInputs || 0;
+										}
+									}
 									const aggregatorVals = this.propsData.aggregatorVals[name] || [];
 									
 									return h(
@@ -979,12 +1148,15 @@ export default {
 												"span",
 												{
 													style: {
-														display: "inline-flex",
-														alignItems: "center",
+														display: numInputs > 1 ? "flex" : "inline-flex",
+														flexDirection: numInputs > 1 ? "column" : "row",
+														alignItems: numInputs > 1 ? "flex-start" : "center",
 														gap: "6px",
 														marginLeft: "12px",
 														paddingLeft: "12px",
 														borderLeft: "1px solid #e2e8f0",
+														width: numInputs > 1 ? "100%" : "auto",
+														maxWidth: numInputs > 1 ? "100%" : "none",
 													},
 												},
 												[
@@ -995,7 +1167,8 @@ export default {
 																	fontSize: "12px",
 																	color: "#64748b",
 																	fontWeight: "500",
-																	marginRight: "4px",
+																	marginBottom: "4px",
+																	width: "100%",
 																},
 															}, "Values:")
 														: h("span", {
@@ -1007,35 +1180,66 @@ export default {
 																},
 															}, "Value:"),
 													// Always show at least one dropdown, use numInputs if > 0, otherwise 1
-													...new Array(numInputs > 0 ? numInputs : 1).fill().map((n, i) =>
-														h(Dropdown, {
+													...new Array(numInputs > 0 ? numInputs : 1).fill().map((n, i) => {
+														// For "Sum over Sum", label the first dropdown as "Numerator" and second as "Denominator"
+														const isSumOverSum = name === __("Sum over Sum");
+														const fieldLabel = isSumOverSum 
+															? (i === 0 ? "Numerator:" : "Denominator:")
+															: (numInputs > 1 ? `Field ${i + 1}:` : "");
+														
+														return h("span", {
 															style: {
-																display: "inline-block",
-																minWidth: "110px",
-																marginRight: i < (numInputs > 0 ? numInputs : 1) - 1 ? "8px" : "0",
-																fontSize: "13px",
-															},
-															values: Object.keys(this.attrValues.value || {}).filter(
-																(e) =>
-																	!this.hiddenAttributes.includes(e) &&
-																	!this.hiddenFromAggregators.includes(e)
-															),
-															value: aggregatorVals[i] || null,
-															title: __('Select the value field for this aggregation'),
-															onInput: (value) => {
-																if (!this.propsData.aggregatorVals[name]) {
-																	this.propsData.aggregatorVals[name] = [];
+																display: "flex",
+																flexDirection: "row",
+																alignItems: "center",
+																width: numInputs > 1 ? "100%" : "auto",
+																marginBottom: numInputs > 1 && i < (numInputs > 0 ? numInputs : 1) - 1 ? "6px" : "0",
+																marginRight: numInputs > 1 ? "0" : (i < (numInputs > 0 ? numInputs : 1) - 1 ? "8px" : "0"),
+															}
+														}, [
+															fieldLabel ? h("span", {
+																style: {
+																	fontSize: "12px",
+																	color: "#64748b",
+																	fontWeight: "500",
+																	marginRight: "6px",
+																	minWidth: numInputs > 1 ? "80px" : "auto",
+																	flexShrink: 0,
 																}
-																// Ensure array is long enough
-																while (this.propsData.aggregatorVals[name].length <= i) {
-																	this.propsData.aggregatorVals[name].push(null);
-																}
-																this.propsData.aggregatorVals[name][i] = value;
-																// Trigger reactivity by updating the object reference
-																this.propsData.aggregatorVals = { ...this.propsData.aggregatorVals };
-															},
-														})
-													),
+															}, fieldLabel) : null,
+															h(Dropdown, {
+																style: {
+																	display: "inline-block",
+																	minWidth: numInputs > 1 ? "120px" : "110px",
+																	width: numInputs > 1 ? "100%" : "auto",
+																	maxWidth: numInputs > 1 ? "100%" : "none",
+																	fontSize: "13px",
+																	flex: numInputs > 1 ? "1" : "0 0 auto",
+																},
+																values: Object.keys(this.attrValues.value || {}).filter(
+																	(e) =>
+																		!this.hiddenAttributes.includes(e) &&
+																		!this.hiddenFromAggregators.includes(e)
+																),
+																value: aggregatorVals[i] || null,
+																title: isSumOverSum 
+																	? (i === 0 ? __('Select the numerator field') : __('Select the denominator field'))
+																	: __('Select the value field for this aggregation'),
+																onInput: (value) => {
+																	if (!this.propsData.aggregatorVals[name]) {
+																		this.propsData.aggregatorVals[name] = [];
+																	}
+																	// Ensure array is long enough
+																	while (this.propsData.aggregatorVals[name].length <= i) {
+																		this.propsData.aggregatorVals[name].push(null);
+																	}
+																	this.propsData.aggregatorVals[name][i] = value;
+																	// Trigger reactivity by updating the object reference
+																	this.propsData.aggregatorVals = { ...this.propsData.aggregatorVals };
+																},
+															})
+														]);
+													}),
 												]
 											),
 											this.selectedAggregators.length > 1

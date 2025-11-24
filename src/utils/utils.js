@@ -387,19 +387,22 @@ const aggregatorTemplates = {
 						}
 					},
 					value() {
-						return this.sumNum / this.sumDenom;
+						return this.sumDenom !== 0 ? this.sumNum / this.sumDenom : 0;
 					},
 					format: formatter,
-					numInputs:
-						typeof num !== "undefined" && typeof denom !== "undefined" ? 0 : 2,
+					numInputs: 2, // Always requires 2 inputs (numerator and denominator)
 				};
 			};
 		};
 	},
 
 	fractionOf(wrapped, type = "total", formatter = usFmtPct) {
-		return (...x) =>
-			function (data, rowKey, colKey) {
+		return (...x) => {
+			// Create the wrapped aggregator to determine its structure
+			const sampleWrapped = wrapped(...Array.from(x || []));
+			const wrappedNumInputs = sampleWrapped().numInputs;
+			
+			return function (data, rowKey, colKey) {
 				return {
 					selector: { total: [[], []], row: [rowKey, []], col: [[], colKey] }[
 						type
@@ -410,16 +413,64 @@ const aggregatorTemplates = {
 					},
 					format: formatter,
 					value() {
-						return (
-							this.inner.value() /
-							data
-								.getAggregator(...Array.from(this.selector || []))
-								.inner.value()
-						);
+						const selector = this.selector || [];
+						const totalAggregator = data.getAggregator(...Array.from(selector));
+						
+						// Handle case where getAggregator returns a collection (multiple aggregators)
+						let baseAggregator = totalAggregator;
+						
+						// Check if it's a collection (object with multiple aggregators)
+						if (totalAggregator && typeof totalAggregator === 'object' && !totalAggregator.inner && !totalAggregator.value) {
+							// It's a collection, find the base aggregator
+							// For "Sum as Fraction of Total", we need to find "Sum" in the collection
+							// Try common base aggregator names first
+							const baseNames = [__("Sum"), __("Integer Sum"), __("Count"), __("Average")];
+							for (const baseName of baseNames) {
+								if (totalAggregator[baseName] && typeof totalAggregator[baseName].value === 'function') {
+									baseAggregator = totalAggregator[baseName];
+									break;
+								}
+							}
+							
+							// If still not found, try all aggregator names in the collection
+							if (!baseAggregator || (typeof baseAggregator === 'object' && !baseAggregator.value)) {
+								const aggregatorNames = data.getAggregatorNames();
+								for (const aggName of aggregatorNames) {
+									// Skip fraction aggregators (they have .inner property)
+									if (totalAggregator[aggName] && 
+										typeof totalAggregator[aggName].value === 'function' &&
+										!totalAggregator[aggName].inner) {
+										baseAggregator = totalAggregator[aggName];
+										break;
+									}
+								}
+							}
+						}
+						
+						// Get the denominator value
+						let denominatorValue = 0;
+						if (baseAggregator) {
+							if (baseAggregator.inner && typeof baseAggregator.inner.value === 'function') {
+								// It's a wrapped aggregator (like another fractionOf)
+								denominatorValue = baseAggregator.inner.value();
+							} else if (typeof baseAggregator.value === 'function') {
+								// It's a base aggregator
+								denominatorValue = baseAggregator.value();
+							}
+						}
+						
+						const numeratorValue = this.inner.value();
+						
+						if (denominatorValue === 0 || denominatorValue === null || denominatorValue === undefined) {
+							return 0;
+						}
+						
+						return numeratorValue / denominatorValue;
 					},
-					numInputs: wrapped(...Array.from(x || []))().numInputs,
+					numInputs: wrappedNumInputs,
 				};
 			};
+		};
 	},
 };
 

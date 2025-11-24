@@ -2,6 +2,9 @@ import { PivotData } from "../utils/utils.js";
 import defaultProps from "../utils/defaultProps.js";
 import { h } from "vue";
 import * as XLSX from "xlsx";
+import ChartWrapper from "./RechartsWrapper.js";
+import { pivotWorkerManager } from "../utils/pivotWorkerManager.js";
+import { optimizeChartDataWithTopN } from "../utils/chartOptimization.js";
 
 function redColorScaleGenerator(values) {
 	const min = Math.min.apply(Math, values);
@@ -29,9 +32,9 @@ function makeRenderer(opts = {}) {
 				},
 			},
 			...defaultProps.props
-		},
-		data() {
-			return {
+	},
+	data() {
+		return {
 				chartInstance: null,
 				cachedPivotData: null,
 				cachedInputHash: null,
@@ -39,16 +42,6 @@ function makeRenderer(opts = {}) {
 				calculationTime: 0,
 				renderingStartTime: null
 			};
-		},
-		mounted() {
-			if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
-				this.renderChart();
-			}
-		},
-		updated() {
-			if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
-				this.renderChart();
-			}
 		},
 		methods: {
 			spanSize(arr, i, j) {
@@ -90,58 +83,51 @@ function makeRenderer(opts = {}) {
 				}
 				return len;
 			},
-			renderChart() {
-				if (!this.$refs.chartContainer) {
-					return;
-				}
-
-				const pivotData = new PivotData(this.$props);
-				let aggregatorList = [];
-				if (typeof pivotData.getAggregatorNames === "function") {
-					const names = pivotData.getAggregatorNames();
-					if (Array.isArray(names)) {
-						aggregatorList = names.filter((name) => typeof name === "string" && name.length);
+			getChartData() {
+				// Check if we have a pre-calculated result with Top-N already applied
+				let rowKeys, colKeys, aggregatorList, pivotData;
+				
+				if (this.usePreCalculatedResult && this.pivotResult && 
+					this.pivotResult.rowKeys && this.pivotResult.colKeys && this.pivotResult.tree) {
+					// Use pre-calculated result (Top-N already applied)
+					rowKeys = this.pivotResult.rowKeys;
+					colKeys = this.pivotResult.colKeys;
+					aggregatorList = this.pivotResult.aggregatorNames || [];
+					pivotData = null; // We'll use pivotResult.tree instead
+				} else {
+					// Create new PivotData instance (for small datasets or when worker not used)
+					pivotData = new PivotData(this.$props);
+					aggregatorList = [];
+					if (typeof pivotData.getAggregatorNames === "function") {
+						const names = pivotData.getAggregatorNames();
+						if (Array.isArray(names)) {
+							aggregatorList = names.filter((name) => typeof name === "string" && name.length);
+						}
 					}
-				}
-				if (!aggregatorList.length) {
-					if (Array.isArray(this.aggregatorName)) {
-						aggregatorList = this.aggregatorName.filter((name) => typeof name === "string" && name.length);
-					} else if (typeof this.aggregatorName === "string" && this.aggregatorName) {
-						aggregatorList = [this.aggregatorName];
+					if (!aggregatorList.length) {
+						if (Array.isArray(this.aggregatorName)) {
+							aggregatorList = this.aggregatorName.filter((name) => typeof name === "string" && name.length);
+						} else if (typeof this.aggregatorName === "string" && this.aggregatorName) {
+							aggregatorList = [this.aggregatorName];
+						}
 					}
-				}
-				if (!aggregatorList.length) {
-					const fallbackKeys = Object.keys(pivotData.props.aggregators || {});
-					if (fallbackKeys.length) {
-						aggregatorList = [fallbackKeys[0]];
+					if (!aggregatorList.length) {
+						const fallbackKeys = Object.keys(pivotData.props.aggregators || {});
+						if (fallbackKeys.length) {
+							aggregatorList = [fallbackKeys[0]];
+						}
 					}
+					rowKeys = pivotData.getRowKeys();
+					colKeys = pivotData.getColKeys();
 				}
+				
 				const primaryAggregator = aggregatorList[0];
 
-				const buildChartElement = (data) => {
-					const chartHeight = (window.innerHeight / 100) * 60;
-
-					// Clear previous chart if exists
-					if (this.chartInstance) {
-						this.chartInstance.destroy?.();
-					}
-
-					setTimeout(() => {
-						if (this.$refs.chartContainer && window.frappe && window.frappe.Chart) {
-							this.chartInstance = new frappe.Chart(this.$refs.chartContainer, {
-								data: data,
-								type: opts.chartType,
-								height: chartHeight,
-								lineOptions: opts.lineOptions,
-								colors: ['#7ad6ff', '#7a94ff', '#d7d0ff', '#ff7b92', '#ffad70', '#fff48d', '#7ef8b3', '#c1ff7a', '#d7b3ff', '#ff7bff', '#b1b1b1', '#8d8d8d']
-							});
-						}
-					}, 100);
-				}
-
-				if (Object.keys(pivotData.tree).length) {
-					const rowKeys = pivotData.getRowKeys();
-					const colKeys = pivotData.getColKeys();
+				// Check if we have data (either from pivotData or pivotResult)
+				const hasData = pivotData ? Object.keys(pivotData.tree).length > 0 : 
+					(this.pivotResult && this.pivotResult.tree && Object.keys(this.pivotResult.tree).length > 0);
+				
+				if (hasData) {
 
 					if (rowKeys.length === 0) {
 						rowKeys.push([]);
@@ -156,7 +142,8 @@ function makeRenderer(opts = {}) {
 						headerRow.push(primaryAggregator || this.aggregatorName);
 					} else {
 						colKeys.map((col) => {
-							let filteredCols = col.filter(el => !!el);
+							// Filter out null, "null", and empty values from column keys
+							let filteredCols = col.filter(el => el !== null && el !== "null" && el !== "");
 							headerRow.push(filteredCols.join("-"));
 						});
 					}
@@ -164,14 +151,27 @@ function makeRenderer(opts = {}) {
 					const rawData = rowKeys.map((r) => {
 						const row = [];
 						colKeys.map((c) => {
-							const aggregator =
-								primaryAggregator
-									? pivotData.getAggregator(r, c, primaryAggregator)
-									: pivotData.getAggregator(r, c);
-							const v =
-								aggregator && typeof aggregator.value === "function"
+							let v = null;
+							
+							if (pivotData) {
+								// Use PivotData instance
+								const aggregator =
+									primaryAggregator
+										? pivotData.getAggregator(r, c, primaryAggregator)
+										: pivotData.getAggregator(r, c);
+								v = aggregator && typeof aggregator.value === "function"
 									? aggregator.value()
 									: null;
+							} else if (this.pivotResult && this.pivotResult.tree) {
+								// Use pre-calculated result (Top-N already applied)
+								const flatRowKey = r.join(String.fromCharCode(0));
+								const flatColKey = c.join(String.fromCharCode(0));
+								const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator];
+								if (cellData) {
+									v = cellData.value;
+								}
+							}
+							
 							row.push(v || "");
 						});
 						return row;
@@ -179,18 +179,33 @@ function makeRenderer(opts = {}) {
 
 					rawData.unshift(headerRow);
 
-					const labels = rowKeys.flat();
+					// Filter out null values from labels
+					// Create labels from row keys, filtering out null values
+					const labels = rowKeys
+						.map(r => {
+							// Filter out null, "null", and empty values, then join
+							const filtered = r.filter(el => el !== null && el !== "null" && el !== "");
+							return filtered.length > 0 ? filtered.join("-") : null;
+						})
+						.filter(label => label !== null && label !== "" && label !== "null" && !String(label).includes("null"));
 
-					const datasets = rawData[0].map((name, index) => {
+					// Filter datasets to exclude those with null in their names
+					// Also filter out datasets where the name contains "null"
+					const datasets = rawData[0]
+						.map((name, index) => {
+							// Skip if name is null, empty, contains "null", or is just "null"
+							if (!name || name === "" || name === "null" || String(name).includes("null")) {
+								return null;
+							}
 						const values = rawData.slice(1).map(row => row[index]);
-
 						return {
 							name: name,
 							values: values
-						}
-					});
+							};
+						})
+						.filter(dataset => dataset !== null && dataset.name && !String(dataset.name).includes("null"));
 
-					const data = {
+					let data = {
 						labels: labels,
 						datasets: datasets
 					}
@@ -206,16 +221,109 @@ function makeRenderer(opts = {}) {
 						});
 					}
 
-					buildChartElement(data)
+					// Apply Top-N with "Others" grouping if data is large
+					// Threshold: 20 items for all chart types
+					const topNThreshold = 20;
+					if (data.labels.length > topNThreshold) {
+						data = optimizeChartDataWithTopN(data, topNThreshold, 'sum', true);
+					}
 
+					return data;
 				} else {
-
-					buildChartElement({ labels: [], datasets: []})
+					return { labels: [], datasets: [] };
 				}
 			},
 		},
 		render() {
 			try {
+				// Use this.mode prop if available, otherwise fall back to opts.mode
+				// Declare once at the top to avoid duplicate declarations
+				const currentMode = this.mode || opts.mode;
+				
+				// Helper function to round numeric values to 2 decimal places
+				const roundNumericValue = (val) => {
+					if (val === null || val === undefined || val === "") {
+						return val;
+					}
+					// Check if value is numeric
+					const numValue = typeof val === 'number' ? val : parseFloat(val);
+					if (!isNaN(numValue) && isFinite(numValue)) {
+						// Round to 2 decimal places
+						return Math.round(numValue * 100) / 100;
+					}
+					return val;
+				};
+
+				// Helper function to apply aggregation method to a collection of values
+				const applyAggregationToValues = (values, aggName) => {
+					if (!values || values.length === 0) {
+						return null;
+					}
+					
+					// Apply aggregation based on aggregator name
+					// Remove parentheses and extra text (e.g., "Average(Amount)" -> "Average")
+					const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+					
+					// Special handling for "List Unique Values" - returns string, not number
+					if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
+						// For List Unique Values: combine all unique values from all cells
+						const allUniqueValues = new Set();
+						values.forEach(v => {
+							if (v !== null && v !== undefined && v !== "") {
+								// Each cell value is a comma-separated string like "North, East, South"
+								const cellValues = String(v).split(',').map(s => s.trim()).filter(s => s.length > 0);
+								cellValues.forEach(val => allUniqueValues.add(val));
+							}
+						});
+						// Return comma-separated list of all unique values
+						return Array.from(allUniqueValues).join(', ');
+					}
+					
+					// For numeric aggregations, filter out null/undefined and non-numeric values
+					const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(parseFloat(v)));
+					if (validValues.length === 0) {
+						return null;
+					}
+					
+					const numValues = validValues.map(v => typeof v === 'number' ? v : parseFloat(v));
+					
+					// Check for specific aggregator types (order matters - check more specific first)
+					// Check for Average FIRST before Sum to avoid false matches
+					if (cleanAggName === 'average' || cleanAggName.includes('average') || cleanAggName.includes('mean') || cleanAggName === 'avg') {
+						// For Average: average of all visible cell values
+						const sum = numValues.reduce((s, val) => s + val, 0);
+						const avg = sum / numValues.length;
+						return avg;
+					} else if (cleanAggName.includes('count') && !cleanAggName.includes('fraction')) {
+						// For Count: sum all counts (each cell is a count)
+						const result = numValues.reduce((sum, val) => sum + val, 0);
+						return result;
+					} else if (cleanAggName.includes('median')) {
+						// For Median: median of all visible cell values
+						const sorted = [...numValues].sort((a, b) => a - b);
+						const mid = Math.floor(sorted.length / 2);
+						const result = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+						return result;
+					} else if (cleanAggName.includes('min')) {
+						// For Minimum: minimum of all visible cell values
+						const result = Math.min(...numValues);
+						return result;
+					} else if (cleanAggName.includes('max')) {
+						// For Maximum: maximum of all visible cell values
+						const result = Math.max(...numValues);
+						return result;
+					} else if (cleanAggName.includes('sum') && !cleanAggName.includes('fraction')) {
+						// For Sum: sum all visible cell values
+						const result = numValues.reduce((sum, val) => sum + val, 0);
+						return result;
+					} else {
+						// Default: sum (for unknown aggregations)
+						// This should not happen, but fallback to sum
+						const result = numValues.reduce((sum, val) => sum + val, 0);
+						return result;
+					}
+				};
+
 				const formatCellDisplay = (aggregator, value) => {
 					let formatted = "";
 					if (aggregator && typeof aggregator.format === "function") {
@@ -230,12 +338,25 @@ function makeRenderer(opts = {}) {
 					if (isEmpty) {
 						return { formatted: "—", isEmpty: true };
 					}
-					if (typeof formatted !== "string") {
-						formatted = String(formatted);
+					
+					// Round numeric values to 2 decimal places
+					const roundedValue = roundNumericValue(formatted);
+					
+					if (typeof roundedValue !== "string") {
+						formatted = String(roundedValue);
+					} else {
+						// If it's a string, check if it represents a number and round it
+						const numValue = parseFloat(roundedValue);
+						if (!isNaN(numValue) && isFinite(numValue)) {
+							formatted = String(Math.round(numValue * 100) / 100);
+						} else {
+							formatted = roundedValue;
+						}
 					}
 					return { formatted, isEmpty: false };
 				};
-				if (['table', 'heat-map-full', 'heat-map-col', 'heat-map-row'].includes(opts.mode)) {
+				
+				if (['table', 'heat-map-full', 'heat-map-col', 'heat-map-row'].includes(currentMode)) {
 					// Start rendering time measurement
 					this.renderingStartTime = performance.now();
 					
@@ -489,10 +610,9 @@ function makeRenderer(opts = {}) {
 									aggregatorName: aggregatorList[0],
 							  }));
 
-					// When there are no horizontal header fields, remove the rightmost columns equal to the number of aggregators
-					if (colAttrs.length === 0 && columnDescriptors.length >= aggregatorCount) {
-						columnDescriptors = columnDescriptors.slice(0, -aggregatorCount);
-					}
+					// When there are no horizontal header fields, we should still show the aggregation value
+					// Don't remove column descriptors - they are needed to display the data
+					// The issue was that this code was removing all columns, leaving no data cells to render
 
 					const headerColAttrs =
 						aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
@@ -505,8 +625,8 @@ function makeRenderer(opts = {}) {
 
 					// Apply heatmap colors if in heatmap mode (works with single or multiple aggregators)
 					// For multiple aggregators, use the first aggregator for heatmap coloring
-					if (opts.mode && ['heat-map-full', 'heat-map-col', 'heat-map-row'].includes(opts.mode)) {
-						const colorScaleGenerator = this.tableColorScaleGenerator;
+					if (currentMode && ['heat-map-full', 'heat-map-col', 'heat-map-row'].includes(currentMode)) {
+					const colorScaleGenerator = this.tableColorScaleGenerator;
 						const primaryAggregator = aggregatorList[0]; // Use first aggregator for heatmap
 						
 						if (usePreCalculated && this.pivotResult) {
@@ -515,16 +635,16 @@ function makeRenderer(opts = {}) {
 								const flatColKey = colKey.join(String.fromCharCode(0));
 								return this.pivotResult.colTotals[flatColKey]?.[primaryAggregator]?.value ?? null;
 							});
-							rowTotalColors = colorScaleGenerator(rowTotalValues);
+					rowTotalColors = colorScaleGenerator(rowTotalValues);
 							
 							const colTotalValues = rowKeys.map((rowKey) => {
 								const flatRowKey = rowKey.join(String.fromCharCode(0));
 								return this.pivotResult.rowTotals[flatRowKey]?.[primaryAggregator]?.value ?? null;
 							});
-							colTotalColors = colorScaleGenerator(colTotalValues);
+					colTotalColors = colorScaleGenerator(colTotalValues);
 
-							if (opts.mode === "heat-map-full") {
-								const allValues = [];
+							if (currentMode === "heat-map-full") {
+						const allValues = [];
 								rowKeys.forEach((rowKey) =>
 									colKeys.forEach((colKey) => {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
@@ -532,11 +652,11 @@ function makeRenderer(opts = {}) {
 										const val = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
 										allValues.push(val);
 									})
-								);
-								const colorScale = colorScaleGenerator(allValues);
+						);
+						const colorScale = colorScaleGenerator(allValues);
 								valueCellColors = (rowKey, colKey, value) => colorScale(value);
-							} else if (opts.mode === "heat-map-row") {
-								const rowColorScales = {};
+							} else if (currentMode === "heat-map-row") {
+						const rowColorScales = {};
 								rowKeys.forEach((rowKey) => {
 									const flatRowKey = rowKey.join(String.fromCharCode(0));
 									const rowValues = colKeys.map((colKey) => {
@@ -544,14 +664,14 @@ function makeRenderer(opts = {}) {
 										return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
 									});
 									rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
-								});
+						});
 								valueCellColors = (rowKey, colKey, value) => {
 									const flatRowKey = rowKey.join(String.fromCharCode(0));
 									const scale = rowColorScales[flatRowKey];
 									return scale ? scale(value) : {};
 								};
-							} else if (opts.mode === "heat-map-col") {
-								const colColorScales = {};
+							} else if (currentMode === "heat-map-col") {
+						const colColorScales = {};
 								colKeys.forEach((colKey) => {
 									const flatColKey = colKey.join(String.fromCharCode(0));
 									const colValues = rowKeys.map((rowKey) => {
@@ -580,7 +700,7 @@ function makeRenderer(opts = {}) {
 							});
 							colTotalColors = colorScaleGenerator(colTotalValues);
 
-							if (opts.mode === "heat-map-full") {
+							if (currentMode === "heat-map-full") {
 								const allValues = [];
 								rowKeys.forEach((rowKey) =>
 									colKeys.forEach((colKey) => {
@@ -591,7 +711,7 @@ function makeRenderer(opts = {}) {
 								);
 								const colorScale = colorScaleGenerator(allValues);
 								valueCellColors = (rowKey, colKey, value) => colorScale(value);
-							} else if (opts.mode === "heat-map-row") {
+							} else if (currentMode === "heat-map-row") {
 								const rowColorScales = {};
 								rowKeys.forEach((rowKey) => {
 									const flatRowKey = rowKey.join(String.fromCharCode(0));
@@ -606,7 +726,7 @@ function makeRenderer(opts = {}) {
 									const scale = rowColorScales[flatRowKey];
 									return scale ? scale(value) : {};
 								};
-							} else if (opts.mode === "heat-map-col") {
+							} else if (currentMode === "heat-map-col") {
 								const colColorScales = {};
 								colKeys.forEach((colKey) => {
 									const flatColKey = colKey.join(String.fromCharCode(0));
@@ -615,36 +735,36 @@ function makeRenderer(opts = {}) {
 										return agg && typeof agg.value === 'function' ? agg.value() : null;
 									});
 									colColorScales[flatColKey] = colorScaleGenerator(colValues);
-								});
+						});
 								valueCellColors = (rowKey, colKey, value) => {
 									const flatColKey = colKey.join(String.fromCharCode(0));
 									const scale = colColorScales[flatColKey];
 									return scale ? scale(value) : {};
 								};
 							}
-						}
 					}
+				}
 
-					const getClickHandler =
-						this.tableOptions && this.tableOptions.clickCallback
-							? (value, rowValues, colValues) => {
-									const filters = {};
-									for (const i of Object.keys(colAttrs || {})) {
-										const attr = colAttrs[i];
-										if (colValues[i] !== null) {
-											filters[attr] = colValues[i];
-										}
-									}
-									for (const i of Object.keys(rowAttrs || {})) {
-										const attr = rowAttrs[i];
-										if (rowValues[i] !== null) {
-											filters[attr] = rowValues[i];
-										}
-									}
-									return (e) =>
+				const getClickHandler =
+					this.tableOptions && this.tableOptions.clickCallback
+						? (value, rowValues, colValues) => {
+							const filters = {};
+							for (const i of Object.keys(colAttrs || {})) {
+								const attr = colAttrs[i];
+								if (colValues[i] !== null) {
+									filters[attr] = colValues[i];
+								}
+							}
+							for (const i of Object.keys(rowAttrs || {})) {
+								const attr = rowAttrs[i];
+								if (rowValues[i] !== null) {
+									filters[attr] = rowValues[i];
+								}
+							}
+							return (e) =>
 										this.tableOptions.clickCallback(e, value, filters, pivotData || null);
-							  }
-							: null;
+						}
+						: null;
 
 					let headerRows;
 
@@ -658,7 +778,7 @@ function makeRenderer(opts = {}) {
 								rowCells.push(
 									h(
 										"th",
-										{
+					{
 											class: ["pvtAxisLabel"],
 											key: `rowAttr${i}`,
 											// Last row attribute spans to cover corner area (its own column + corner = 2 columns)
@@ -701,9 +821,9 @@ function makeRenderer(opts = {}) {
 								if (rowSpan > 0) {
 									cells.push(
 										h("th", {
-											colSpan: rowAttrs.length,
+												colSpan: rowAttrs.length,
 											rowSpan,
-										})
+											})
 									);
 								}
 							}
@@ -749,9 +869,9 @@ function makeRenderer(opts = {}) {
 								}
 								cells.push(
 									h(
-										"th",
-										{
-											class: ["pvtColLabel"],
+												"th",
+												{
+													class: ["pvtColLabel"],
 											key: `colKey${i}-${attrIndex}`,
 											colSpan: span,
 											rowSpan: 1,
@@ -771,15 +891,15 @@ function makeRenderer(opts = {}) {
 								if (remainingRows > 0) {
 									cells.push(
 										h(
-											"th",
-											{
+												"th",
+												{
 												class: ["pvtTotalGroupLabel"],
 												colSpan: aggregatorCount,
 												rowSpan: remainingRows,
-											},
+												},
 											__("Totals")
-										)
-									);
+											)
+								);
 								}
 							}
 
@@ -795,7 +915,7 @@ function makeRenderer(opts = {}) {
 											},
 											formatAggregatorHeader(aggName)
 										)
-									);
+										);
 								});
 								} else {
 									cells.push(
@@ -810,11 +930,11 @@ function makeRenderer(opts = {}) {
 								}
 							}
 
-							return h(
-								"tr",
-								{
+								return h(
+									"tr",
+									{
 									key: `colAttrs${attrIndex}`,
-								},
+									},
 								cells
 							);
 						});
@@ -841,16 +961,16 @@ function makeRenderer(opts = {}) {
 								);
 								rowCells.push(
 									h(
-										"th",
-										{
-											class: ["pvtRowLabel"],
+												"th",
+												{
+													class: ["pvtRowLabel"],
 											key: `rowKeyLabel${rowIndex}-${attrIndex}`,
 											rowSpan: span,
 											colSpan: shouldSpan ? 2 : 1,
-										},
-										txt
+												},
+												txt
 									)
-								);
+											);
 							});
 
 							columnDescriptors.forEach(({ colKey, aggregatorName }, descriptorIndex) => {
@@ -865,7 +985,19 @@ function makeRenderer(opts = {}) {
 									const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
 									if (cellData) {
 										value = cellData.value;
-										formatted = cellData.formatted || (value !== null && value !== undefined ? String(value) : '');
+										// Round numeric values to 2 decimal places
+										const roundedValue = roundNumericValue(value);
+										if (cellData.formatted) {
+											// If formatted value exists, check if it's numeric and round it
+											const numValue = parseFloat(cellData.formatted);
+											if (!isNaN(numValue) && isFinite(numValue)) {
+												formatted = String(Math.round(numValue * 100) / 100);
+											} else {
+												formatted = cellData.formatted;
+											}
+										} else {
+											formatted = roundedValue !== null && roundedValue !== undefined ? String(roundedValue) : '';
+										}
 										isEmpty = value === null || value === undefined;
 									}
 								} else if (pivotData) {
@@ -888,19 +1020,19 @@ function makeRenderer(opts = {}) {
 								}
 								rowCells.push(
 									h(
-										"td",
-										Object.assign(
-											{
+												"td",
+												Object.assign(
+													{
 												class: cellClasses,
 												style: valueCellColors(rowKey, colKey, value),
 												key: `pvtVal${rowIndex}-${descriptorIndex}`,
-											},
-											getClickHandler
-												? {
+													},
+													getClickHandler
+														? {
 														onClick: getClickHandler(value, rowKey, colKey),
-												  }
-												: {}
-										),
+														}
+														: {}
+												),
 										formatted
 									)
 								);
@@ -912,23 +1044,81 @@ function makeRenderer(opts = {}) {
 									let totalDisplay = { formatted: '', isEmpty: true };
 									
 									if (usePreCalculated && this.pivotResult) {
-										// Use pre-calculated row totals from worker
-										const flatRowKey = rowKey.join(String.fromCharCode(0));
-										const rowTotalData = this.pivotResult.rowTotals[flatRowKey]?.[aggName];
-										if (rowTotalData) {
-											totalValue = rowTotalData.value;
-											totalDisplay = {
-												formatted: rowTotalData.formatted || (totalValue !== null && totalValue !== undefined ? String(totalValue) : ''),
-												isEmpty: totalValue === null || totalValue === undefined
-											};
+										// Calculate total from visible columns only
+										let sum = 0;
+										let hasValue = false;
+										columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+											if (aggregatorName === aggName) {
+												const flatRowKey = rowKey.join(String.fromCharCode(0));
+												const flatColKey = colKey.join(String.fromCharCode(0));
+												const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+												if (cellData && cellData.value !== null && cellData.value !== undefined) {
+													sum += typeof cellData.value === 'number' ? cellData.value : (parseFloat(cellData.value) || 0);
+													hasValue = true;
+												}
+											}
+										});
+										if (hasValue) {
+											totalValue = sum;
+											// Round numeric value to 2 decimal places
+											totalValue = roundNumericValue(totalValue);
+											// Format the total value
+											const sampleColKey = columnDescriptors.find(cd => cd.aggregatorName === aggName)?.colKey;
+											if (sampleColKey) {
+												const flatRowKey = rowKey.join(String.fromCharCode(0));
+												const flatColKey = sampleColKey.join(String.fromCharCode(0));
+												const sampleCellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+												if (sampleCellData && sampleCellData.formatted) {
+													if (aggName === 'Count' || aggName === 'count') {
+														totalDisplay = {
+															formatted: Math.round(totalValue).toLocaleString(),
+															isEmpty: false
+														};
+													} else {
+														totalDisplay = {
+															formatted: totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+															isEmpty: false
+														};
+													}
+												} else {
+													totalDisplay = {
+														formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
+														isEmpty: totalValue === null || totalValue === undefined
+													};
+												}
+											} else {
+												totalDisplay = {
+													formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
+													isEmpty: totalValue === null || totalValue === undefined
+												};
+											}
 										}
 									} else if (pivotData) {
-										// Use PivotData instance - only if pivotData exists
-										const totalAggregator = pivotData.getAggregator(rowKey, [], aggName);
-										totalValue = totalAggregator && typeof totalAggregator.value === "function"
-											? totalAggregator.value()
-											: null;
-										totalDisplay = formatCellDisplay(totalAggregator, totalValue);
+										// Calculate total from visible columns only
+										let sum = 0;
+										let hasValue = false;
+										let sampleAggregator = null;
+										columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+											if (aggregatorName === aggName) {
+												const aggregator = pivotData.getAggregator(rowKey, colKey, aggName);
+												if (aggregator && typeof aggregator.value === "function") {
+													const value = aggregator.value();
+													if (value !== null && value !== undefined) {
+														sum += typeof value === 'number' ? value : (parseFloat(value) || 0);
+														hasValue = true;
+														if (!sampleAggregator) {
+															sampleAggregator = aggregator;
+														}
+													}
+												}
+											}
+										});
+										if (hasValue && sampleAggregator) {
+											totalValue = sum;
+											// Round numeric value to 2 decimal places
+											totalValue = roundNumericValue(totalValue);
+											totalDisplay = formatCellDisplay(sampleAggregator, totalValue);
+										}
 									}
 									// If neither is available, totalDisplay remains empty
 									
@@ -938,19 +1128,19 @@ function makeRenderer(opts = {}) {
 									}
 									rowCells.push(
 										h(
-											"td",
-											Object.assign(
-												{
+												"td",
+												Object.assign(
+													{
 													class: totalClasses,
 													style: colTotalColors(totalValue),
 													key: `rowTotal${rowIndex}-${aggIndex}`,
-												},
-												getClickHandler
-													? {
+													},
+													getClickHandler
+														? {
 															onClick: getClickHandler(totalValue, rowKey, [null]),
-													  }
-													: {}
-											),
+														}
+														: {}
+												),
 											totalDisplay.formatted
 										)
 									);
@@ -975,23 +1165,100 @@ function makeRenderer(opts = {}) {
 							let grandValue = null;
 							let grandDisplay = { formatted: '', isEmpty: true };
 							
+							const aggName = aggregatorList[0];
+							
 							if (usePreCalculated && this.pivotResult) {
-								// Use pre-calculated grand total from worker
-								const grandTotalData = this.pivotResult.allTotal[aggregatorList[0]];
-								if (grandTotalData) {
-									grandValue = grandTotalData.value;
-									grandDisplay = {
-										formatted: grandTotalData.formatted || (grandValue !== null && grandValue !== undefined ? String(grandValue) : ''),
-										isEmpty: grandValue === null || grandValue === undefined
-									};
+								// Collect all visible cell values for this aggregator
+								const visibleValues = [];
+								rowKeys.forEach((rowKey) => {
+									columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+										if (aggregatorName === aggName) {
+											const flatRowKey = rowKey.join(String.fromCharCode(0));
+											const flatColKey = colKey.join(String.fromCharCode(0));
+											const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+											if (cellData && cellData.value !== null && cellData.value !== undefined) {
+												visibleValues.push(cellData.value);
+											}
+										}
+									});
+								});
+								
+								// Apply aggregation method to visible values
+								grandValue = applyAggregationToValues(visibleValues, aggName);
+								
+								if (grandValue !== null && grandValue !== undefined) {
+									// Round numeric value to 2 decimal places
+									grandValue = roundNumericValue(grandValue);
+									
+									// Get a sample aggregator for formatting
+									const sampleRowKey = rowKeys[0];
+									const sampleColKey = columnDescriptors.find(cd => cd.aggregatorName === aggName)?.colKey;
+									if (sampleRowKey && sampleColKey) {
+										const flatRowKey = sampleRowKey.join(String.fromCharCode(0));
+										const flatColKey = sampleColKey.join(String.fromCharCode(0));
+										const sampleCellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+										if (sampleCellData) {
+											const numValue = parseFloat(sampleCellData.formatted);
+											if (!isNaN(numValue) && isFinite(numValue)) {
+												if (aggName === 'Count' || aggName === 'count') {
+													grandDisplay = {
+														formatted: Math.round(grandValue).toLocaleString(),
+														isEmpty: false
+													};
+												} else {
+													grandDisplay = {
+														formatted: grandValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+														isEmpty: false
+													};
+												}
+											} else {
+												grandDisplay = {
+													formatted: String(grandValue),
+													isEmpty: false
+												};
+											}
+										} else {
+											grandDisplay = {
+												formatted: String(grandValue),
+												isEmpty: false
+											};
+										}
+									} else {
+										grandDisplay = {
+											formatted: String(grandValue),
+											isEmpty: false
+										};
+									}
 								}
 							} else if (pivotData) {
-								// Use PivotData instance
-								const grandAggregator = pivotData.getAggregator([], [], aggregatorList[0]);
-								grandValue = grandAggregator && typeof grandAggregator.value === "function"
-									? grandAggregator.value()
-									: null;
-								grandDisplay = formatCellDisplay(grandAggregator, grandValue);
+								// Collect all visible cell values for this aggregator
+								const visibleValues = [];
+								let sampleAggregator = null;
+								rowKeys.forEach((rowKey) => {
+									columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+										if (aggregatorName === aggName) {
+											const aggregator = pivotData.getAggregator(rowKey, colKey, aggName);
+											if (aggregator && typeof aggregator.value === "function") {
+												const value = aggregator.value();
+												if (value !== null && value !== undefined) {
+													visibleValues.push(value);
+													if (!sampleAggregator) {
+														sampleAggregator = aggregator;
+													}
+												}
+											}
+										}
+									});
+								});
+								
+								// Apply aggregation method to visible values
+								grandValue = applyAggregationToValues(visibleValues, aggName);
+								
+								if (grandValue !== null && grandValue !== undefined && sampleAggregator) {
+									// Round numeric value to 2 decimal places
+									grandValue = roundNumericValue(grandValue);
+									grandDisplay = formatCellDisplay(sampleAggregator, grandValue);
+								}
 							}
 
 							// Calculate total columns in a data row to match the structure
@@ -1034,18 +1301,18 @@ function makeRenderer(opts = {}) {
 							}
 							totalCells.push(
 								h(
-									"td",
-									Object.assign(
-										{
+											"td",
+											Object.assign(
+												{
 											class: grandClasses,
 											key: "grandTotalRightmost",
-										},
-										getClickHandler
-											? {
+												},
+												getClickHandler
+													? {
 													onClick: getClickHandler(grandValue, [null], [null]),
-											  }
-											: {}
-									),
+													}
+													: {}
+											),
 									grandDisplay.formatted
 								)
 							);
@@ -1071,23 +1338,81 @@ function makeRenderer(opts = {}) {
 								let columnDisplay = { formatted: '', isEmpty: true };
 								
 								if (usePreCalculated && this.pivotResult) {
-									// Use pre-calculated column totals from worker
-									const flatColKey = colKey.join(String.fromCharCode(0));
-									const colTotalData = this.pivotResult.colTotals[flatColKey]?.[aggregatorName];
-									if (colTotalData) {
-										totalValue = colTotalData.value;
-										columnDisplay = {
-											formatted: colTotalData.formatted || (totalValue !== null && totalValue !== undefined ? String(totalValue) : ''),
-											isEmpty: totalValue === null || totalValue === undefined
-										};
+									// Calculate total from visible rows only
+									let sum = 0;
+									let hasValue = false;
+									rowKeys.forEach((rowKey) => {
+										const flatRowKey = rowKey.join(String.fromCharCode(0));
+										const flatColKey = colKey.join(String.fromCharCode(0));
+										const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
+										if (cellData && cellData.value !== null && cellData.value !== undefined) {
+											sum += typeof cellData.value === 'number' ? cellData.value : (parseFloat(cellData.value) || 0);
+											hasValue = true;
+										}
+									});
+									if (hasValue) {
+										totalValue = sum;
+										// Round numeric value to 2 decimal places
+										totalValue = roundNumericValue(totalValue);
+										// Format the total value using the aggregator's format function
+										const sampleRowKey = rowKeys.find(rk => {
+											const flatRowKey = rk.join(String.fromCharCode(0));
+											const flatColKey = colKey.join(String.fromCharCode(0));
+											return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
+										});
+										if (sampleRowKey) {
+											const flatRowKey = sampleRowKey.join(String.fromCharCode(0));
+											const flatColKey = colKey.join(String.fromCharCode(0));
+											const sampleCellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
+											// Try to get formatted value from sample cell, or format manually
+											if (sampleCellData && sampleCellData.formatted) {
+												// Use aggregator's format logic - for Count, use integer format; for Sum/Avg, use decimal format
+												if (aggregatorName === 'Count' || aggregatorName === 'count') {
+													columnDisplay = {
+														formatted: Math.round(totalValue).toLocaleString(),
+														isEmpty: false
+													};
+												} else {
+													columnDisplay = {
+														formatted: totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+														isEmpty: false
+													};
+												}
+											} else {
+												columnDisplay = {
+													formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
+													isEmpty: totalValue === null || totalValue === undefined
+												};
+											}
+										} else {
+											columnDisplay = {
+												formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
+												isEmpty: totalValue === null || totalValue === undefined
+											};
+										}
 									}
 								} else if (pivotData) {
-									// Use PivotData instance
-									const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
-									totalValue = totalAggregator && typeof totalAggregator.value === "function"
-										? totalAggregator.value()
-										: null;
-									columnDisplay = formatCellDisplay(totalAggregator, totalValue);
+									// Calculate total from visible rows only
+									let sum = 0;
+									let hasValue = false;
+									let sampleAggregator = null;
+									rowKeys.forEach((rowKey) => {
+										const aggregator = pivotData.getAggregator(rowKey, colKey, aggregatorName);
+										if (aggregator && typeof aggregator.value === "function") {
+											const value = aggregator.value();
+											if (value !== null && value !== undefined) {
+												sum += typeof value === 'number' ? value : (parseFloat(value) || 0);
+												hasValue = true;
+												if (!sampleAggregator) {
+													sampleAggregator = aggregator;
+												}
+											}
+										}
+									});
+									if (hasValue && sampleAggregator) {
+										totalValue = sum;
+										columnDisplay = formatCellDisplay(sampleAggregator, totalValue);
+									}
 								}
 								const columnClasses = ["pvtTotal"];
 								if (columnDisplay.isEmpty) {
@@ -1119,22 +1444,119 @@ function makeRenderer(opts = {}) {
 									let grandDisplay = { formatted: '', isEmpty: true };
 									
 									if (usePreCalculated && this.pivotResult) {
-										// Use pre-calculated grand total from worker
-										const grandTotalData = this.pivotResult.allTotal[aggName];
-										if (grandTotalData) {
-											grandValue = grandTotalData.value;
-											grandDisplay = {
-												formatted: grandTotalData.formatted || (grandValue !== null && grandValue !== undefined ? String(grandValue) : ''),
-												isEmpty: grandValue === null || grandValue === undefined
-											};
+										// Collect all visible cell values for this aggregator
+										const visibleValues = [];
+										rowKeys.forEach((rowKey) => {
+											columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+												if (aggregatorName === aggName) {
+													const flatRowKey = rowKey.join(String.fromCharCode(0));
+													const flatColKey = colKey.join(String.fromCharCode(0));
+													const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+													if (cellData && cellData.value !== null && cellData.value !== undefined) {
+														visibleValues.push(cellData.value);
+													}
+												}
+											});
+										});
+										
+										// Apply aggregation method to visible values
+										grandValue = applyAggregationToValues(visibleValues, aggName);
+										
+										if (grandValue !== null && grandValue !== undefined) {
+											// Check if this is a string aggregator (like List Unique Values)
+											const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+											const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+											
+											if (!isStringAggregator) {
+												// Round numeric value to 2 decimal places
+												grandValue = roundNumericValue(grandValue);
+											}
+											
+											// Get a sample aggregator for formatting
+											const sampleRowKey = rowKeys[0];
+											const sampleColKey = columnDescriptors.find(cd => cd.aggregatorName === aggName)?.colKey;
+											if (sampleRowKey && sampleColKey) {
+												const flatRowKey = sampleRowKey.join(String.fromCharCode(0));
+												const flatColKey = sampleColKey.join(String.fromCharCode(0));
+												const sampleCellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+												if (sampleCellData) {
+													// For string aggregators, use the value directly
+													if (isStringAggregator) {
+														grandDisplay = {
+															formatted: String(grandValue),
+															isEmpty: false
+														};
+													} else {
+														// Try to get format from sample cell's formatted value
+														const numValue = parseFloat(sampleCellData.formatted);
+														if (!isNaN(numValue) && isFinite(numValue)) {
+															// Use same format style
+															if (aggName === 'Count' || aggName === 'count') {
+																grandDisplay = {
+																	formatted: Math.round(grandValue).toLocaleString(),
+																	isEmpty: false
+																};
+															} else {
+																grandDisplay = {
+																	formatted: grandValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+																	isEmpty: false
+																};
+															}
+														} else {
+															grandDisplay = {
+																formatted: String(grandValue),
+																isEmpty: false
+															};
+														}
+													}
+												} else {
+													grandDisplay = {
+														formatted: String(grandValue),
+														isEmpty: false
+													};
+												}
+											} else {
+												grandDisplay = {
+													formatted: String(grandValue),
+													isEmpty: false
+												};
+											}
 										}
 									} else if (pivotData) {
-										// Use PivotData instance
-										const grandAggregator = pivotData.getAggregator([], [], aggName);
-										grandValue = grandAggregator && typeof grandAggregator.value === "function"
-											? grandAggregator.value()
-											: null;
-										grandDisplay = formatCellDisplay(grandAggregator, grandValue);
+										// Collect all visible cell values for this aggregator
+										const visibleValues = [];
+										let sampleAggregator = null;
+										rowKeys.forEach((rowKey) => {
+											columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+												if (aggregatorName === aggName) {
+													const aggregator = pivotData.getAggregator(rowKey, colKey, aggName);
+													if (aggregator && typeof aggregator.value === "function") {
+														const value = aggregator.value();
+														if (value !== null && value !== undefined) {
+															visibleValues.push(value);
+															if (!sampleAggregator) {
+																sampleAggregator = aggregator;
+															}
+														}
+													}
+												}
+											});
+										});
+										
+										// Apply aggregation method to visible values
+										grandValue = applyAggregationToValues(visibleValues, aggName);
+										
+										if (grandValue !== null && grandValue !== undefined && sampleAggregator) {
+											// Check if this is a string aggregator (like List Unique Values)
+											const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+											const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+											
+											if (!isStringAggregator) {
+												// Round numeric value to 2 decimal places
+												grandValue = roundNumericValue(grandValue);
+											}
+											grandDisplay = formatCellDisplay(sampleAggregator, grandValue);
+										}
 									}
 									const grandClasses = ["pvtGrandTotal"];
 									if (grandDisplay.isEmpty) {
@@ -1151,9 +1573,9 @@ function makeRenderer(opts = {}) {
 												getClickHandler
 													? {
 															onClick: getClickHandler(grandValue, [null], [null]),
-													  }
-													: {}
-											),
+												}
+												: {}
+										),
 											grandDisplay.formatted
 										)
 									);
@@ -1199,11 +1621,38 @@ function makeRenderer(opts = {}) {
 				}
 				
 				// Handle chart renderers
-				else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(opts.mode)) {
-					return h('div', {
-						ref: 'chartContainer',
-						id: 'pivot_chart'
-					});
+				else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(currentMode)) {
+					const chartData = this.getChartData();
+					
+					// Map chart mode to Recharts type
+					let chartType = 'bar';
+					if (currentMode === 'line-chart') {
+						chartType = 'line';
+					} else if (currentMode === 'pie-chart') {
+						chartType = 'pie';
+					} else if (currentMode === 'percentage-chart') {
+						chartType = 'percentage';
+					}
+
+				// Check if we should use worker for LTTB optimization (line/bar charts with large data)
+				const useWorkerForLTTB = pivotWorkerManager.isAvailable() && 
+					(chartType === 'line' || chartType === 'bar') &&
+					chartData && chartData.labels && chartData.labels.length > 500;
+
+				return h('div', {
+						style: {
+							width: '100%',
+							padding: '20px'
+						}
+					}, [
+						h(ChartWrapper, {
+							data: chartData,
+							type: chartType,
+							colors: ['#7ad6ff', '#7a94ff', '#d7d0ff', '#ff7b92', '#ffad70', '#fff48d', '#7ef8b3', '#c1ff7a', '#d7b3ff', '#ff7bff', '#b1b1b1', '#8d8d8d'],
+							lineOptions: opts.lineOptions || {},
+							useWorkerOptimization: useWorkerForLTTB
+						})
+					]);
 				}
 			} catch (error) {
 				console.error('Error in TableRenderer render:', error);
@@ -1364,7 +1813,7 @@ const XLSXExportRenderer = {
 				} else if (attrIndex === 0 && headerColAttrs.length > 1) {
 					headerRow.push(__("Totals"));
 				}
-			}
+		}
 
 			format_data.push(headerRow);
 		});
@@ -1523,7 +1972,7 @@ const renderers = {
 	}),
 	"Table Row Heatmap": makeRenderer({
 		mode: "heat-map-row",
-		name: "vue-table-col-heatmap",
+		name: "vue-table-row-heatmap",
 	}),
 	"Bar Chart": makeRenderer({
 		name: "bar-chart",
@@ -1549,12 +1998,6 @@ const renderers = {
 		name: "pie-chart",
 		mode: 'pie-chart',
 		chartType: "pie",
-		lineOptions: {},
-	}),
-	"Percentage Chart": makeRenderer({
-		name: "percentage-chart",
-		mode: 'percentage-chart',
-		chartType: "percentage",
 		lineOptions: {},
 	}),
 	"Export": XLSXExportRenderer,

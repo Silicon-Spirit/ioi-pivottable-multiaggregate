@@ -1,24 +1,48 @@
 <template>
 	<div class="app-container">
 		<div class="controls">
-			<label for="dataset-count">Dataset Count:</label>
-			<input
-				id="dataset-count"
-				type="number"
-				v-model.number="datasetCount"
-				min="1"
-				max="150000"
-				@input="generateData"
-			/>
-			<button @click="generateData">Generate Data</button>
+			<label for="excel-file-input" class="file-input-label">
+				<input
+					id="excel-file-input"
+					type="file"
+					accept=".xlsx,.xls,.csv"
+					@change="handleFileUpload"
+					style="display: none;"
+				/>
+				<button type="button" @click="triggerFileInput">Upload Excel File</button>
+			</label>
+			<button @click="loadExcelData">Load Sample Data</button>
+			<button @click="analyzeFields">Analyze Fields</button>
 			<span class="info">Current dataset size: {{ currentData?.length || 0 }} records</span>
+			<span v-if="uploading" class="upload-status">Processing file...</span>
+			<div v-if="fieldAnalysis" class="field-analysis">
+				<div class="analysis-section">
+					<strong>Header Fields (≤50 unique values):</strong>
+					<span class="field-count">{{ fieldAnalysis.headerFields.length }}</span>
+					<div class="field-list">
+						<span v-for="field in fieldAnalysis.headerFields" :key="field" class="field-tag">
+							{{ field }} ({{ fieldAnalysis.fieldStats[field] }})
+						</span>
+					</div>
+				</div>
+				<div class="analysis-section">
+					<strong>Aggregation Fields (>50 unique values):</strong>
+					<span class="field-count">{{ fieldAnalysis.aggregationFields.length }}</span>
+					<div class="field-list">
+						<span v-for="field in fieldAnalysis.aggregationFields" :key="field" class="field-tag aggregation">
+							{{ field }} ({{ fieldAnalysis.fieldStats[field] }})
+						</span>
+					</div>
+				</div>
+			</div>
 		</div>
 		<PivottableUi
+			v-if="currentData && currentData.length > 0"
 			:data="currentData"
-			:rows="['Department']"
-			:cols="['Quarter']"
-			:vals="['Amount']"
-			:aggregatorNames="['Count', 'Sum']"
+			:rows="rows"
+			:cols="cols"
+			:vals="vals"
+			:aggregatorNames="aggregatorNames"
 			rendererName="Table"
 			:rowTotal="true"
 			:colTotal="true"
@@ -29,60 +53,8 @@
 <script>
 import { ref, shallowRef } from "vue";
 import PivottableUi from "./PivottableUi.js";
-
-// Function to generate large datasets
-function generateLargeDataset(count) {
-	const departments = ["Sales", "Support", "Marketing"];
-	const regions = ["North", "South", "East", "West"];
-	const products = ["Software", "Hardware", "Advertising"];
-	const times = ["10:00:00", "11:00:00", "12:00:00", "16:00:00"];
-	const amounts = ["12", "34", "32", "68", "46.78"];
-
-	const quarters = ["Q1", "Q2", "Q3", "Q4"];
-	const parts = ["1", "2", "3", "4", "9", "10"];
-	const quantities = ["124", "224", "724", "824", "924"];
-	const dates = ["2021-01-01", "2021-01-02", "2021-01-03", "2021-01-04"];
-	const dataset = [];
-	
-	for (let i = 0; i < count; i++) {
-		if (i < 50) {
-			dataset.push({
-				Department: departments[Math.floor(Math.random() * departments.length)],
-				Region: regions[Math.floor(Math.random() * regions.length)],
-				Product: products[Math.floor(Math.random() * products.length)],
-				Time: times[Math.floor(Math.random() * times.length)],
-				Amount: amounts[Math.floor(Math.random() * amounts.length)],
-				Quarter: quarters[Math.floor(Math.random() * quarters.length)],
-				Part: parts[Math.floor(Math.random() * parts.length)],
-				Quantity: quantities[Math.floor(Math.random() * quantities.length)],
-				Date: dates[Math.floor(Math.random() * dates.length)],
-			});
-		} else if (i % 3 === 0) {
-			dataset.push({
-				Department: departments[Math.floor(Math.random() * departments.length)],
-				Region: regions[Math.floor(Math.random() * regions.length)],
-				Product: products[Math.floor(Math.random() * products.length)],
-				Time: times[Math.floor(Math.random() * times.length)],
-				Amount: amounts[Math.floor(Math.random() * amounts.length)]
-			});
-		} else if (i % 2 === 0) {
-			dataset.push({
-				Quarter: quarters[Math.floor(Math.random() * quarters.length)],
-				Part: parts[Math.floor(Math.random() * parts.length)],
-				Quantity: quantities[Math.floor(Math.random() * quantities.length)],
-				Date: dates[Math.floor(Math.random() * dates.length)],
-				Amount: amounts[Math.floor(Math.random() * amounts.length)],
-			});
-		} else {
-			dataset.push({
-				Product: products[Math.floor(Math.random() * products.length)],
-				Quarter: quarters[Math.floor(Math.random() * quarters.length)],
-				Amount: amounts[Math.floor(Math.random() * amounts.length)],
-			});
-		}
-	}
-	return dataset;
-}
+import { categorizeFields } from "../utils/fieldAnalyzer.js";
+import * as XLSX from "xlsx";
 
 export default {
 	name: "App",
@@ -90,28 +62,171 @@ export default {
 		PivottableUi,
 	},
 	setup() {
-		const datasetCount = ref(150000);
-		const currentData = shallowRef(generateLargeDataset(150000));
-		
-		const generateData = () => {
-			const count = Math.max(1, Math.min(150000, datasetCount.value || 100));
+		const currentData = shallowRef([]);
+		const fieldAnalysis = ref(null);
+		const rows = ref([]);
+		const cols = ref([]);
+		const vals = ref([]);
+		const aggregatorNames = ref(['Count', 'Sum']);
+		const uploading = ref(false);
+
+		// Trigger file input click
+		const triggerFileInput = () => {
+			const fileInput = document.getElementById('excel-file-input');
+			if (fileInput) {
+				fileInput.click();
+			}
+		};
+
+		// Handle Excel file upload
+		const handleFileUpload = async (event) => {
+			const file = event.target.files?.[0];
+			if (!file) {
+				return;
+			}
+
+			uploading.value = true;
 			
-			// Measure dataset generation time
-			const genStartTime = performance.now();
-			currentData.value = generateLargeDataset(count);
-			const genEndTime = performance.now();
-			const genDuration = genEndTime - genStartTime;
-			
-			console.log(`\n========== Performance Metrics ==========`);
-			console.log(`[Performance] Dataset Generation: ${genDuration.toFixed(2)}ms for ${count} records`);
-			console.log(`[Performance] Generation Rate: ${(count / genDuration * 1000).toFixed(0)} records/sec`);
-			console.log(`==========================================\n`);
+			try {
+				// Read file as ArrayBuffer
+				const arrayBuffer = await file.arrayBuffer();
+				
+				// Parse Excel file
+				const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+				
+				// Get first sheet
+				const firstSheetName = workbook.SheetNames[0];
+				const worksheet = workbook.Sheets[firstSheetName];
+				
+				// Convert to JSON
+				const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+					raw: false, // Convert dates and numbers to strings for consistency
+					defval: null, // Default value for empty cells
+					dateNF: 'yyyy-mm-dd' // Date format
+				});
+
+				// Process the data: convert numeric strings to numbers and handle nulls
+				const processedData = jsonData.map(row => {
+					const processedRow = {};
+					for (const key in row) {
+						let value = row[key];
+						
+						// Convert empty strings to null
+						if (value === '' || value === 'null') {
+							value = null;
+						}
+						// Try to convert numeric strings to numbers
+						else if (typeof value === 'string' && value.trim() !== '') {
+							const numValue = parseFloat(value);
+							if (!isNaN(numValue) && isFinite(numValue) && value.trim() === String(numValue)) {
+								value = numValue;
+							}
+						}
+						
+						processedRow[key] = value;
+					}
+					return processedRow;
+				});
+
+				currentData.value = processedData;
+				console.log(`✅ Loaded ${processedData.length} records from Excel file: ${file.name}`);
+				
+				// Reset file input
+				event.target.value = '';
+				
+				// Automatically analyze fields after loading
+				analyzeFields();
+			} catch (error) {
+				console.error('Error processing Excel file:', error);
+				alert('Failed to process Excel file. Please make sure it is a valid Excel file (.xlsx, .xls) or CSV. Error: ' + error.message);
+			} finally {
+				uploading.value = false;
+			}
+		};
+
+		// Load Excel JSON data (sample data)
+		const loadExcelData = async () => {
+			try {
+				const response = await fetch('/excel-data.json');
+				if (!response.ok) {
+					throw new Error(`HTTP error! status: ${response.status}`);
+				}
+				const data = await response.json();
+				currentData.value = data;
+				console.log(`✅ Loaded ${data.length} records from Excel data`);
+				
+				// Automatically analyze fields after loading
+				analyzeFields();
+			} catch (error) {
+				console.error('Error loading Excel data:', error);
+				alert('Failed to load Excel data. Please check if excel-data.json exists in the public folder. Error: ' + error.message);
+			}
+		};
+
+		// Analyze fields and categorize them
+		const analyzeFields = () => {
+			if (!currentData.value || currentData.value.length === 0) {
+				console.warn('No data available for analysis');
+				return;
+			}
+
+			const analysis = categorizeFields(currentData.value, 50);
+			fieldAnalysis.value = analysis;
+
+			console.log('\n========== Field Analysis ==========');
+			console.log('Header Fields (≤50 unique values):', analysis.headerFields);
+			console.log('Aggregation Fields (>50 unique values):', analysis.aggregationFields);
+			console.log('Field Statistics:', analysis.fieldStats);
+			console.log('=====================================\n');
+
+			// Automatically configure pivot table
+			// Use first few header fields for rows and cols
+			// Use aggregation fields for values
+			if (analysis.headerFields.length > 0) {
+				// Set first header field as row, second as col (if available)
+				rows.value = [analysis.headerFields[0]];
+				if (analysis.headerFields.length > 1) {
+					cols.value = [analysis.headerFields[1]];
+				} else {
+					cols.value = [];
+				}
+			}
+
+			if (analysis.aggregationFields.length > 0) {
+				// Use all aggregation fields as values
+				vals.value = analysis.aggregationFields;
+				// Set default aggregators
+				aggregatorNames.value = ['Count', 'Sum'];
+			} else {
+				// Fallback: if no aggregation fields, use numeric fields from header fields
+				const numericFields = analysis.headerFields.filter(field => {
+					const sampleValue = currentData.value.find(r => r[field] != null)?.[field];
+					return typeof sampleValue === 'number';
+				});
+				if (numericFields.length > 0) {
+					vals.value = numericFields.slice(0, 2); // Use first 2 numeric fields
+				}
+			}
+
+			console.log('Pivot Table Configuration:');
+			console.log('Rows:', rows.value);
+			console.log('Cols:', cols.value);
+			console.log('Values:', vals.value);
+			console.log('Aggregators:', aggregatorNames.value);
 		};
 		
 		return {
-			datasetCount,
 			currentData,
-			generateData,
+			fieldAnalysis,
+			rows,
+			cols,
+			vals,
+			aggregatorNames,
+			uploading,
+			triggerFileInput,
+			handleFileUpload,
+			loadExcelData,
+			analyzeFields,
 		};
 	},
 };
@@ -170,6 +285,68 @@ export default {
 	color: #666;
 	font-size: 14px;
 	margin-left: auto;
+}
+
+.field-analysis {
+	margin-top: 16px;
+	padding: 16px;
+	background: white;
+	border-radius: 8px;
+	border: 1px solid #ddd;
+	width: 100%;
+}
+
+.analysis-section {
+	margin-bottom: 16px;
+}
+
+.analysis-section:last-child {
+	margin-bottom: 0;
+}
+
+.analysis-section strong {
+	display: block;
+	margin-bottom: 8px;
+	color: #333;
+	font-size: 14px;
+}
+
+.field-count {
+	margin-left: 8px;
+	color: #1976d2;
+	font-weight: 600;
+}
+
+.field-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.field-tag {
+	padding: 4px 12px;
+	background: #e3f2fd;
+	color: #1976d2;
+	border-radius: 16px;
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.field-tag.aggregation {
+	background: #fff3e0;
+	color: #f57c00;
+}
+
+.file-input-label {
+	display: inline-block;
+}
+
+.upload-status {
+	color: #1976d2;
+	font-size: 14px;
+	font-weight: 500;
+	margin-left: 8px;
 }
 </style>
 

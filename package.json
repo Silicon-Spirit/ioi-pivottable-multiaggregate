@@ -47,6 +47,8 @@
 		"vue": "^3.0.0"
 	},
 	"dependencies": {
+		"echarts": "^6.0.0",
+		"vue-echarts": "^8.0.1",
 		"vuedraggable": "^4.1.0",
 		"xlsx": "^0.18.5"
 	},
