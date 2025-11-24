@@ -60,6 +60,8 @@
 	color: #1976d2;
 	box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 	transition: all 0.2s;
+	position: relative;
+	display: inline-block;
 }
 
 .pvtUnused li span.pvtAttr:hover {
@@ -71,6 +73,20 @@
 .pvtUnused li span.pvtAttr.sortonly {
 	border-color: #90caf9;
 	background: #f5f5f5;
+	cursor: default !important;
+}
+
+.pvtUnused li:not([data-id]) {
+	cursor: default !important;
+	pointer-events: auto;
+}
+
+.pvtUnused li:not([data-id]) span.pvtAttr {
+	cursor: default !important;
+}
+
+.pvtUnused li:not([data-id]) span.pvtAttr:hover {
+	cursor: default !important;
 }
 
 .pvtUnused li span.pvtAttr.disabled {
@@ -467,6 +483,8 @@ table.pvtTable tbody tr td {
 	padding: 6px 12px;
 	white-space: nowrap;
 	border-radius: 4px;
+	position: relative;
+	display: inline-block;
 	user-select: none;
 	font-size: 13px;
 	color: #424242;
@@ -486,6 +504,20 @@ table.pvtTable tbody tr td {
 .pvtAxisContainer li span.pvtAttr.sortonly {
 	border: 1px solid #e0e0e0;
 	background: #fafafa;
+	cursor: default !important;
+}
+
+.pvtAxisContainer li:not([data-id]) {
+	cursor: default !important;
+	pointer-events: auto;
+}
+
+.pvtAxisContainer li:not([data-id]) span.pvtAttr {
+	cursor: default !important;
+}
+
+.pvtAxisContainer li:not([data-id]) span.pvtAttr:hover {
+	cursor: default !important;
 }
 
 .pvtAxisContainer li span.pvtAttr.disabled {
@@ -628,7 +660,9 @@ table.pvtTable tbody tr td {
 	max-width: 400px;
 	min-width: 250px;
 	background-color: #fff;
-	position: fixed;
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
 	padding: 12px;
 	user-select: none;
 	min-height: 120px;
@@ -638,6 +672,17 @@ table.pvtTable tbody tr td {
 	-moz-user-select: none;
 	-khtml-user-select: none;
 	-ms-user-select: none;
+}
+
+/* Ensure filter box doesn't get cut off by overflow */
+.pvtUnused,
+.pvtAxisContainer {
+	overflow: visible !important;
+}
+
+.pvtUnused li,
+.pvtAxisContainer li {
+	overflow: visible !important;
 }
 
 .pvtFilterBox input[type='text'] {
@@ -779,5 +824,50 @@ table.pvtTable tbody tr td {
 		gap: 4px;
 		padding: 4px;
 		flex-wrap: wrap;
+	}
+}
+
+/* Notification Styles - User-friendly light colored alerts */
+.pvtNotification {
+	background: #fff3cd;
+	border: 1px solid #ffc107;
+	color: #856404;
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+.pvtNotification-warning {
+	background: #fff3cd;
+	border: 1px solid #ffc107;
+	color: #856404;
+}
+
+.pvtNotification-info {
+	background: #d1ecf1;
+	border: 1px solid #bee5eb;
+	color: #0c5460;
+}
+
+.pvtNotification-error {
+	background: #f8d7da;
+	border: 1px solid #f5c6cb;
+	color: #721c24;
+}
+
+.pvtNotification:hover {
+	box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2) !important;
+}
+
+.pvtNotificationClose:hover {
+	background: rgba(0, 0, 0, 0.1) !important;
+}
+
+@keyframes slideInRight {
+	from {
+		transform: translateX(100%);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
 	}
 }

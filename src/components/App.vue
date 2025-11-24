@@ -43,6 +43,7 @@
 			:cols="cols"
 			:vals="vals"
 			:aggregatorNames="aggregatorNames"
+			:headerFields="fieldAnalysis ? fieldAnalysis.headerFields : []"
 			rendererName="Table"
 			:rowTotal="true"
 			:colTotal="true"

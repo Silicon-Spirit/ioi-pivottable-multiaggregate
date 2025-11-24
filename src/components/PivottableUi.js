@@ -89,6 +89,12 @@ export default {
 				return [];
 			},
 		},
+		headerFields: {
+			type: Array,
+			default: function () {
+				return [];
+			},
+		},
 		menuLimit: {
 			type: Number,
 			default: 500,
@@ -186,6 +192,11 @@ export default {
 	},
 	data() {
 		return {
+			notification: {
+				show: false,
+				message: "",
+				type: "info", // 'info', 'warning', 'error'
+			},
 			propsData: {
 				aggregatorName: "",
 				aggregatorNames: [],
@@ -1011,6 +1022,25 @@ export default {
 				}
 			}
 		},
+		showNotification(message, type = "info") {
+			// Clear existing timer
+			if (this.notificationTimer) {
+				clearTimeout(this.notificationTimer);
+			}
+			
+			// Show notification
+			this.notification = {
+				show: true,
+				message: message,
+				type: type,
+			};
+			
+			// Auto-hide after 4 seconds
+			this.notificationTimer = setTimeout(() => {
+				this.notification.show = false;
+				this.notificationTimer = null;
+			}, 4000);
+		},
 		makeDnDCell(items, onChange, classes) {
 			return h(
 				draggable,
@@ -1026,14 +1056,21 @@ export default {
 					itemKey: (x) => x,
 				},
 				{
-					item: ({ element }) =>
-						h(DraggableAttribute, {
-							sortable:
-								this.sortonlyFromDragDrop.includes(element) ||
-								!this.disabledFromDragDrop.includes(element),
-							draggable:
-								!this.sortonlyFromDragDrop.includes(element) &&
-								!this.disabledFromDragDrop.includes(element),
+					item: ({ element }) => {
+						const isDisabledFromDragDrop = this.disabledFromDragDrop.includes(element);
+						const isSortonly = this.sortonlyFromDragDrop.includes(element);
+						
+						// Determine if field is a header field (can be dragged) or aggregation field (cannot be dragged)
+						const isHeaderField = this.headerFields.length === 0 || this.headerFields.includes(element);
+						
+						// All fields should be sortable to allow filter panels to work
+						// Only header fields should be draggable
+						const sortable = true; // Always true - filters need this
+						const draggable = isHeaderField && !isSortonly && !isDisabledFromDragDrop; // Only header fields can be dragged
+						
+						return h(DraggableAttribute, {
+							sortable: sortable,
+							draggable: draggable,
 							name: element,
 							key: element,
 							attrValues: (this.attrValues.value || {})[element] || {},
@@ -1045,7 +1082,8 @@ export default {
 							"onUpdate:filter": this.updateValueFilter,
 							"onMoveToTop:filterbox": this.moveFilterBoxToTop,
 							"onOpen:filterbox": this.openFilterBox,
-						}),
+						});
+					},
 				}
 			);
 		},
@@ -1370,6 +1408,18 @@ export default {
 				) {
 					return;
 				}
+				
+				// Check if trying to drop a non-header field to columns
+				if (e.to.classList.contains("pvtCols") && this.headerFields.length > 0) {
+					if (!this.headerFields.includes(item)) {
+						this.showNotification(
+							`"${item}" cannot be set as a column header. Only header fields (≤50 unique values) can be used as row/column headers.`,
+							"warning"
+						);
+						return;
+					}
+				}
+				
 				if (e.from.classList.contains("pvtCols")) {
 					this.propsData.cols.splice(e.oldIndex, 1);
 					this.clearWorkerCache();
@@ -1393,6 +1443,18 @@ export default {
 				) {
 					return;
 				}
+				
+				// Check if trying to drop a non-header field to rows
+				if (e.to.classList.contains("pvtRows") && this.headerFields.length > 0) {
+					if (!this.headerFields.includes(item)) {
+						this.showNotification(
+							`"${item}" cannot be set as a row header. Only header fields (≤50 unique values) can be used as row/column headers.`,
+							"warning"
+						);
+						return;
+					}
+				}
+				
 				if (e.from.classList.contains("pvtRows")) {
 					this.propsData.rows.splice(e.oldIndex, 1);
 					this.clearWorkerCache();
@@ -1446,16 +1508,100 @@ export default {
 		const outputCell = this.outputCell(props);
 
 		return h(
-			"table",
+			"div",
 			{
-				class: ["pvtUi"],
+				style: {
+					position: "relative",
+					width: "100%",
+				},
 			},
 			[
-				h("tbody", [
-					h("tr", [rendererCell, unusedAttrsCell]),
-					h("tr", [aggregatorCell, colAttrsCell]),
-					h("tr", [rowAttrsCell, outputCell]),
-				]),
+				h(
+					"table",
+					{
+						class: ["pvtUi"],
+					},
+					[
+						h("tbody", [
+							h("tr", [rendererCell, unusedAttrsCell]),
+							h("tr", [aggregatorCell, colAttrsCell]),
+							h("tr", [rowAttrsCell, outputCell]),
+						]),
+					]
+				),
+				// Notification overlay
+				this.notification.show
+					? h(
+							"div",
+							{
+								class: ["pvtNotification", `pvtNotification-${this.notification.type}`],
+								style: {
+									position: "fixed",
+									top: "20px",
+									right: "20px",
+									zIndex: 10000,
+									padding: "16px 20px",
+									borderRadius: "8px",
+									boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+									maxWidth: "400px",
+									display: "flex",
+									alignItems: "center",
+									gap: "12px",
+									animation: "slideInRight 0.3s ease-out",
+									cursor: "pointer",
+									onClick: () => {
+										this.notification.show = false;
+										if (this.notificationTimer) {
+											clearTimeout(this.notificationTimer);
+											this.notificationTimer = null;
+										}
+									},
+								},
+							},
+							[
+								h("div", {
+									class: ["pvtNotificationIcon"],
+									style: {
+										fontSize: "20px",
+										lineHeight: "1",
+									},
+								}, this.notification.type === "warning" ? "⚠️" : "ℹ️"),
+								h("div", {
+									class: ["pvtNotificationMessage"],
+									style: {
+										flex: "1",
+										fontSize: "14px",
+										lineHeight: "1.5",
+									},
+								}, this.notification.message),
+								h("button", {
+									class: ["pvtNotificationClose"],
+									style: {
+										background: "transparent",
+										border: "none",
+										fontSize: "18px",
+										cursor: "pointer",
+										padding: "0",
+										width: "24px",
+										height: "24px",
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "center",
+										borderRadius: "4px",
+										transition: "background 0.2s",
+									},
+									onClick: (e) => {
+										e.stopPropagation();
+										this.notification.show = false;
+										if (this.notificationTimer) {
+											clearTimeout(this.notificationTimer);
+											this.notificationTimer = null;
+										}
+									},
+								}, "×"),
+							]
+						)
+					: null,
 			]
 		);
 	},

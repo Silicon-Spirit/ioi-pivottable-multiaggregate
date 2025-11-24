@@ -279,13 +279,35 @@ export default {
 		return h(
 			"li",
 			{
-				"data-id": !this.disabled ? this.name : undefined,
+				"data-id": (!this.disabled && this.draggable) ? this.name : undefined,
+				draggable: this.draggable ? true : false,
+				style: {
+					cursor: this.draggable ? "move" : "default",
+					userSelect: "none",
+				},
+				onDragstart: (e) => {
+					if (!this.draggable) {
+						e.preventDefault();
+						e.stopPropagation();
+						return false;
+					}
+				},
+				onDrag: (e) => {
+					if (!this.draggable) {
+						e.preventDefault();
+						e.stopPropagation();
+						return false;
+					}
+				},
 			},
 			[
 				h(
 					"span",
 					{
 						class: spanClass,
+						style: {
+							cursor: this.draggable ? "move" : "default",
+						},
 					},
 					[
 						this.name,
