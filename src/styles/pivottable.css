@@ -70,9 +70,23 @@
 	box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+.pvtUnused li span.pvtAttr.headerField {
+	background: #e8f5e9;
+	border-color: #4caf50;
+	color: #2e7d32;
+	font-weight: 500;
+}
+
+.pvtUnused li span.pvtAttr.headerField:hover {
+	background: #c8e6c9;
+	border-color: #66bb6a;
+	box-shadow: 0 2px 6px rgba(76, 175, 80, 0.2);
+}
+
 .pvtUnused li span.pvtAttr.sortonly {
-	border-color: #90caf9;
+	border-color: #bdbdbd;
 	background: #f5f5f5;
+	color: #757575;
 	cursor: default !important;
 }
 
@@ -501,9 +515,22 @@ table.pvtTable tbody tr td {
 	border-color: #bdbdbd;
 }
 
+.pvtAxisContainer li span.pvtAttr.headerField {
+	background: #e8f5e9;
+	border-color: #4caf50;
+	color: #2e7d32;
+	font-weight: 500;
+}
+
+.pvtAxisContainer li span.pvtAttr.headerField:hover {
+	background: #c8e6c9;
+	border-color: #66bb6a;
+}
+
 .pvtAxisContainer li span.pvtAttr.sortonly {
-	border: 1px solid #e0e0e0;
-	background: #fafafa;
+	border: 1px solid #bdbdbd;
+	background: #f5f5f5;
+	color: #757575;
 	cursor: default !important;
 }
 

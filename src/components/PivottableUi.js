@@ -1071,6 +1071,7 @@ export default {
 						return h(DraggableAttribute, {
 							sortable: sortable,
 							draggable: draggable,
+							headerField: isHeaderField,
 							name: element,
 							key: element,
 							attrValues: (this.attrValues.value || {})[element] || {},

@@ -15,6 +15,10 @@ export default {
 			type: Boolean,
 			default: true,
 		},
+		headerField: {
+			type: Boolean,
+			default: false,
+		},
 		name: {
 			type: String,
 			required: true,
@@ -270,6 +274,9 @@ export default {
 		const filtered =
 			Object.keys(this.valueFilter).length !== 0 ? " pvtFilteredAttribute" : "";
 		const spanClass = ["pvtAttr" + filtered];
+		if (this.headerField) {
+			spanClass.push("headerField");
+		}
 		if (this.sortonly) {
 			spanClass.push("sortonly");
 		}
