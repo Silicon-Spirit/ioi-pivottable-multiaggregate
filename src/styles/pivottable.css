@@ -117,51 +117,56 @@ table.pvtTable tbody tr td {
 	font-weight: bold;
 }
 
-/* Sort controls */
+/* Sort controls - Arrow buttons */
 .pvtRowOrder,
 .pvtColOrder {
 	cursor: pointer;
 	width: 28px;
 	height: 28px;
-	margin-left: 8px;
+	margin: 0 3px;
 	display: inline-flex !important;
 	align-items: center;
 	justify-content: center;
 	user-select: none;
 	text-decoration: none !important;
-	color: #424242;
-	font-size: 16px;
+	color: #64b5f6;
+	font-size: 14px;
 	font-weight: 600;
-	border-radius: 4px;
-	transition: all 0.2s;
-	background: #f5f5f5;
-	border: 1px solid #e0e0e0;
+	border-radius: 6px;
+	transition: all 0.2s ease;
+	background: #e3f2fd;
+	border: 1.5px solid #90caf9;
 	vertical-align: middle;
 	line-height: 1;
 	min-width: 28px;
 	visibility: visible !important;
 	opacity: 1 !important;
+	box-shadow: 0 1px 3px rgba(33, 150, 243, 0.1);
 }
 
 .pvtRowOrder:hover,
 .pvtColOrder:hover {
-	background: #e0e0e0;
-	color: #212121;
-	border-color: #bdbdbd;
-	box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+	background: #bbdefb;
+	color: #1976d2;
+	border-color: #64b5f6;
+	box-shadow: 0 4px 8px rgba(33, 150, 243, 0.2);
+	transform: translateY(-1px);
 }
 
 .pvtRowOrder:active,
 .pvtColOrder:active {
-	background: #d5d5d5;
-	transform: scale(0.95);
+	background: #90caf9;
+	border-color: #42a5f5;
+	color: #1565c0;
+	transform: translateY(0) scale(0.98);
+	box-shadow: 0 2px 4px rgba(33, 150, 243, 0.15);
 }
 
 /* Control areas */
 .pvtAxisContainer,
 .pvtVals {
 	background: #fff;
-	padding: 8px;
+	padding: 6px;
 	min-width: 20px;
 	min-height: 20px;
 	border-top-right-radius: 4px;
@@ -173,11 +178,11 @@ table.pvtTable tbody tr td {
 
 .pvtVals.pvtText {
 	vertical-align: middle;
-	font-size: 14px;
+	font-size: 12px;
 	font-weight: 500;
 	color: #424242;
 	user-select: none;
-	padding: 8px 12px;
+	padding: 6px 10px;
 	text-align: start;
 }
 
@@ -186,8 +191,86 @@ table.pvtTable tbody tr td {
 	display: flex;
 	flex-direction: row;
 	align-items: center;
+	justify-content: center;
 	flex-wrap: wrap;
-	gap: 4px;
+	gap: 6px;
+}
+
+/* Aggregator orders container - center-aligned */
+.pvtAggregatorOrders {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 6px;
+	width: 100%;
+}
+
+/* Add/Remove aggregator buttons */
+.pvtAggregatorAdd,
+.pvtAggregatorRemove {
+	cursor: pointer;
+	width: 28px;
+	height: 28px;
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	user-select: none;
+	text-decoration: none !important;
+	font-size: 16px;
+	font-weight: 600;
+	border-radius: 6px;
+	transition: all 0.2s ease;
+	border: 1.5px solid;
+	vertical-align: middle;
+	line-height: 1;
+	min-width: 28px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.pvtAggregatorAdd {
+	background: #c8e6c9;
+	color: #2e7d32;
+	border-color: #81c784;
+}
+
+.pvtAggregatorAdd:hover {
+	background: #a5d6a7;
+	color: #1b5e20;
+	border-color: #66bb6a;
+	box-shadow: 0 4px 8px rgba(76, 175, 80, 0.25);
+	transform: translateY(-1px);
+}
+
+.pvtAggregatorAdd:active {
+	background: #81c784;
+	border-color: #4caf50;
+	color: #1b5e20;
+	transform: translateY(0) scale(0.98);
+	box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);
+}
+
+.pvtAggregatorRemove {
+	background: #ffcdd2;
+	color: #c62828;
+	border-color: #ef9a9a;
+}
+
+.pvtAggregatorRemove:hover {
+	background: #ef9a9a;
+	color: #b71c1c;
+	border-color: #e57373;
+	box-shadow: 0 4px 8px rgba(244, 67, 54, 0.25);
+	transform: translateY(-1px);
+}
+
+.pvtAggregatorRemove:active {
+	background: #e57373;
+	border-color: #ef5350;
+	color: #b71c1c;
+	transform: translateY(0) scale(0.98);
+	box-shadow: 0 2px 4px rgba(244, 67, 54, 0.2);
 }
 
 .pvtRenderers {
@@ -226,11 +309,11 @@ table.pvtTable tbody tr td {
 	background-image: none;
 	border-radius: 4px;
 	padding: 1px 2px;
-	height: 32px;
-	font-size: 14px;
+	height: 28px;
+	font-size: 12px;
 	font-weight: 500;
 	outline: none;
-	line-height: 1.5;
+	line-height: 1.4;
 	user-select: none;
 	cursor: pointer;
 	transition: all 0.2s;
@@ -239,7 +322,7 @@ table.pvtTable tbody tr td {
 	-moz-user-select: none;
 	-khtml-user-select: none;
 	-ms-user-select: none;
-	width: 205px !important;
+	width: 180px !important;
 	margin: auto !important;
 }
 
@@ -265,37 +348,9 @@ table.pvtTable tbody tr td {
 	margin-bottom: 0px;
 }
 
-/* Aggregator list and options styling */
-.pvtAggregatorList {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	margin-bottom: 8px;
-	width: 100%;
-}
-
-.pvtAggregatorOption {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	background: #ffffff;
-	border: 1px solid #e0e0e0;
-	padding: 10px 12px;
-	border-radius: 6px;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-	transition: all 0.2s ease;
-	flex-wrap: wrap;
-	width: 100%;
-}
-
-.pvtAggregatorOption:hover {
-	border-color: #2196f3;
-	box-shadow: 0 2px 6px rgba(33, 150, 243, 0.15);
-}
-
 .pvtAggregatorOption .pvtDropdown {
 	width: auto !important;
-	min-width: 120px;
+	min-width: 100px;
 	margin: 0 !important;
 	flex-shrink: 0;
 }
@@ -308,7 +363,7 @@ table.pvtTable tbody tr td {
 }
 
 .pvtAggregatorOption span .pvtDropdown {
-	min-width: 100px;
+	min-width: 85px;
 	background-color: #e3f2fd !important;
 	border-color: #90caf9 !important;
 	border-width: 1.5px !important;
@@ -336,6 +391,38 @@ table.pvtTable tbody tr td {
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
+	text-align: center;
+}
+
+/* Center-align all aggregator options */
+.pvtAggregatorList {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+	width: 100%;
+}
+
+.pvtAggregatorOption {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	background: #ffffff;
+	border: 1px solid #e0e0e0;
+	padding: 8px 10px;
+	border-radius: 5px;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+	transition: all 0.2s ease;
+	flex-wrap: wrap;
+	width: 100%;
+	max-width: 100%;
+}
+
+.pvtAggregatorOption:hover {
+	border-color: #2196f3;
+	box-shadow: 0 2px 6px rgba(33, 150, 243, 0.15);
 }
 
 .pvtRows {
@@ -638,19 +725,49 @@ table.pvtTable tbody tr td {
 	font-weight: 400;
 }
 
-/* Responsive adjustments */
-/* @media (max-width: 768px) {
-	.pvtUi {
-		font-size: 12px;
+/* Responsive adjustments for control panel buttons */
+@media screen and (max-width: 768px) {
+	.pvtAggregatorAdd,
+	.pvtAggregatorRemove,
+	.pvtRowOrder,
+	.pvtColOrder {
+		width: 26px;
+		height: 26px;
+		min-width: 26px;
+		font-size: 14px;
 	}
 	
-	table.pvtTable {
-		font-size: 12px;
+	.pvtAggregatorOrders {
+		gap: 5px;
+		padding: 5px;
 	}
 	
-	table.pvtTable thead tr th,
-	table.pvtTable tbody tr th,
-	table.pvtTable tbody tr td {
+	.pvtVals {
+		padding: 6px;
+		gap: 6px;
+	}
+	
+	.pvtAggregatorOption {
 		padding: 6px 8px;
+		flex-direction: column;
+		align-items: center;
 	}
-} */
+}
+
+@media screen and (max-width: 480px) {
+	.pvtAggregatorAdd,
+	.pvtAggregatorRemove,
+	.pvtRowOrder,
+	.pvtColOrder {
+		width: 24px;
+		height: 24px;
+		min-width: 24px;
+		font-size: 12px;
+	}
+	
+	.pvtAggregatorOrders {
+		gap: 4px;
+		padding: 4px;
+		flex-wrap: wrap;
+	}
+}
