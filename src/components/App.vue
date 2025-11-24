@@ -35,16 +35,29 @@ function generateLargeDataset(count) {
 	const departments = ["Sales", "Support", "Marketing"];
 	const regions = ["North", "South", "East", "West"];
 	const products = ["Software", "Hardware", "Advertising"];
-	const quarters = ["Q1", "Q2", "Q3", "Q4"];
-	const amounts = ["12", "34", "32", "68", "46.78", "89.09"];
-	const parts = ["1", "2", "3", "4", "9", "10"];
-	const quantities = ["124", "224", "724", "824", "924", "10"];
-	const dates = ["2021-01-01", "2021-01-02", "2021-01-03", "2021-01-04"];
 	const times = ["10:00:00", "11:00:00", "12:00:00", "16:00:00"];
+	const amounts = ["12", "34", "32", "68", "46.78"];
+
+	const quarters = ["Q1", "Q2", "Q3", "Q4"];
+	const parts = ["1", "2", "3", "4", "9", "10"];
+	const quantities = ["124", "224", "724", "824", "924"];
+	const dates = ["2021-01-01", "2021-01-02", "2021-01-03", "2021-01-04"];
 	const dataset = [];
 	
 	for (let i = 0; i < count; i++) {
-		if (i % 2 === 0) {
+		if (i < 50) {
+			dataset.push({
+				Department: departments[Math.floor(Math.random() * departments.length)],
+				Region: regions[Math.floor(Math.random() * regions.length)],
+				Product: products[Math.floor(Math.random() * products.length)],
+				Time: times[Math.floor(Math.random() * times.length)],
+				Amount: amounts[Math.floor(Math.random() * amounts.length)],
+				Quarter: quarters[Math.floor(Math.random() * quarters.length)],
+				Part: parts[Math.floor(Math.random() * parts.length)],
+				Quantity: quantities[Math.floor(Math.random() * quantities.length)],
+				Date: dates[Math.floor(Math.random() * dates.length)],
+			});
+		} else if (i % 3 === 0) {
 			dataset.push({
 				Department: departments[Math.floor(Math.random() * departments.length)],
 				Region: regions[Math.floor(Math.random() * regions.length)],
@@ -52,17 +65,19 @@ function generateLargeDataset(count) {
 				Time: times[Math.floor(Math.random() * times.length)],
 				Amount: amounts[Math.floor(Math.random() * amounts.length)]
 			});
-		} else {
+		} else if (i % 2 === 0) {
 			dataset.push({
-				Department: departments[Math.floor(Math.random() * departments.length)],
-				Region: regions[Math.floor(Math.random() * regions.length)],
-				Product: products[Math.floor(Math.random() * products.length)],
 				Quarter: quarters[Math.floor(Math.random() * quarters.length)],
-				Amount: amounts[Math.floor(Math.random() * amounts.length)],
 				Part: parts[Math.floor(Math.random() * parts.length)],
 				Quantity: quantities[Math.floor(Math.random() * quantities.length)],
 				Date: dates[Math.floor(Math.random() * dates.length)],
-				Time: times[Math.floor(Math.random() * times.length)],
+				Amount: amounts[Math.floor(Math.random() * amounts.length)],
+			});
+		} else {
+			dataset.push({
+				Product: products[Math.floor(Math.random() * products.length)],
+				Quarter: quarters[Math.floor(Math.random() * quarters.length)],
+				Amount: amounts[Math.floor(Math.random() * amounts.length)],
 			});
 		}
 	}
