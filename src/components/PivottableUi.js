@@ -995,7 +995,7 @@ export default {
 							const value = aggregator.value();
 							const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
 							result.rowTotals[flatRowKey][aggName] = { value, formatted };
-							// Debug: log for List Unique Values to verify stored value
+							// Debug: log for List Unique Values and Average to verify stored value
 							const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
 							if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
 								console.log(`[Row Total Storage] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
@@ -1003,6 +1003,17 @@ export default {
 								console.log(`[Row Total Storage] Formatted:`, formatted, `Type:`, typeof formatted);
 								if (aggregator.uniq) {
 									console.log(`[Row Total Storage] Aggregator.uniq:`, aggregator.uniq, `Length:`, aggregator.uniq.length);
+								}
+							}
+							if (cleanAggName === 'average' || cleanAggName.includes('average')) {
+								console.log(`[Row Total Storage - Average] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
+								console.log(`[Row Total Storage - Average] Value:`, value, `Type:`, typeof value);
+								console.log(`[Row Total Storage - Average] Formatted:`, formatted, `Type:`, typeof formatted);
+								if (aggregator.n !== undefined) {
+									console.log(`[Row Total Storage - Average] Aggregator.n (count):`, aggregator.n);
+								}
+								if (aggregator.m !== undefined) {
+									console.log(`[Row Total Storage - Average] Aggregator.m (mean):`, aggregator.m);
 								}
 							}
 						} else {

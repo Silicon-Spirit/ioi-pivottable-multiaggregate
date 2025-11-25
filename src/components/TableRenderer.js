@@ -1054,7 +1054,9 @@ function makeRenderer(opts = {}) {
 								);
 							});
 
-							if (this.rowTotal) {
+							// Only add row totals column if there are column attributes
+							// When colAttrs.length === 0, we don't want the rightmost row totals column
+							if (this.rowTotal && colAttrs.length > 0) {
 								aggregatorList.forEach((aggName, aggIndex) => {
 									let totalValue = null;
 									let totalDisplay = { formatted: '', isEmpty: true };
@@ -1077,11 +1079,16 @@ function makeRenderer(opts = {}) {
 										const rowTotalData = this.pivotResult.rowTotals?.[flatRowKey]?.[aggName];
 										if (rowTotalData) {
 											totalValue = rowTotalData.value;
-											// Debug: log for List Unique Values to verify retrieved value
+											// Debug: log for List Unique Values and Average to verify retrieved value
 											if (isStringAggregator) {
 												console.log(`[Row Total Retrieval] Retrieved value:`, totalValue, `Type:`, typeof totalValue);
 												console.log(`[Row Total Retrieval] Retrieved formatted:`, rowTotalData.formatted, `Type:`, typeof rowTotalData.formatted);
 												console.log(`[Row Total Retrieval] Full rowTotalData:`, rowTotalData);
+											}
+											if (cleanAggName === 'average' || cleanAggName.includes('average')) {
+												console.log(`[Row Total Retrieval - Average] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
+												console.log(`[Row Total Retrieval - Average] Retrieved value:`, totalValue, `Type:`, typeof totalValue);
+												console.log(`[Row Total Retrieval - Average] Retrieved formatted:`, rowTotalData.formatted, `Type:`, typeof rowTotalData.formatted);
 											}
 											
 											if (!isStringAggregator && typeof totalValue === 'number') {
@@ -1130,26 +1137,31 @@ function makeRenderer(opts = {}) {
 													};
 												}
 											} else {
-												// For numeric aggregations: sum visible cell values
-												let sum = 0;
-												let hasValue = false;
+												// For numeric aggregations: use applyAggregationToValues to correctly handle different aggregation types
+												// This is important for Average - you can't sum the averages, you need to average them
+												const visibleValues = [];
 												columnDescriptors.forEach(({ colKey, aggregatorName }) => {
 													if (aggregatorName === aggName) {
 														const flatColKey = colKey.join(String.fromCharCode(0));
 														const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
 														if (cellData && cellData.value !== null && cellData.value !== undefined) {
-															sum += typeof cellData.value === 'number' ? cellData.value : (parseFloat(cellData.value) || 0);
-															hasValue = true;
+															visibleValues.push(cellData.value);
 														}
 													}
 												});
-												if (hasValue) {
-													totalValue = sum;
-													totalValue = roundNumericValue(totalValue);
-													totalDisplay = {
-														formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
-														isEmpty: totalValue === null || totalValue === undefined
-													};
+												if (visibleValues.length > 0) {
+													totalValue = applyAggregationToValues(visibleValues, aggName);
+													if (totalValue !== null && totalValue !== undefined) {
+														const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+														const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+														if (!isStringAggregator && typeof totalValue === 'number') {
+															totalValue = roundNumericValue(totalValue);
+														}
+														totalDisplay = {
+															formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
+															isEmpty: totalValue === null || totalValue === undefined
+														};
+													}
 												}
 											}
 										}
@@ -1159,7 +1171,7 @@ function makeRenderer(opts = {}) {
 										const rowTotalAggregator = pivotData.getAggregator(rowKey, [], aggName);
 										if (rowTotalAggregator && typeof rowTotalAggregator.value === "function") {
 											totalValue = rowTotalAggregator.value();
-											// Debug: log for List Unique Values
+											// Debug: log for List Unique Values and Average
 											const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
 											const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
 											if (isStringAggregator) {
@@ -1167,6 +1179,16 @@ function makeRenderer(opts = {}) {
 												console.log(`[Row Total PivotData] totalValue from aggregator.value():`, totalValue, `Type:`, typeof totalValue);
 												if (rowTotalAggregator.uniq) {
 													console.log(`[Row Total PivotData] Aggregator.uniq:`, rowTotalAggregator.uniq, `Length:`, rowTotalAggregator.uniq.length);
+												}
+											}
+											if (cleanAggName === 'average' || cleanAggName.includes('average')) {
+												console.log(`[Row Total PivotData - Average] Row key:`, rowKey, `Aggregator:`, aggName);
+												console.log(`[Row Total PivotData - Average] totalValue from aggregator.value():`, totalValue, `Type:`, typeof totalValue);
+												if (rowTotalAggregator.n !== undefined) {
+													console.log(`[Row Total PivotData - Average] Aggregator.n (count):`, rowTotalAggregator.n);
+												}
+												if (rowTotalAggregator.m !== undefined) {
+													console.log(`[Row Total PivotData - Average] Aggregator.m (mean):`, rowTotalAggregator.m);
 												}
 											}
 											
@@ -1387,57 +1409,60 @@ function makeRenderer(opts = {}) {
 								let columnDisplay = { formatted: '', isEmpty: true };
 								
 								if (usePreCalculated && this.pivotResult) {
-									// Calculate total from visible rows only
-									let sum = 0;
-									let hasValue = false;
-									rowKeys.forEach((rowKey) => {
-										const flatRowKey = rowKey.join(String.fromCharCode(0));
-										const flatColKey = colKey.join(String.fromCharCode(0));
-										const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
-										if (cellData && cellData.value !== null && cellData.value !== undefined) {
-											sum += typeof cellData.value === 'number' ? cellData.value : (parseFloat(cellData.value) || 0);
-											hasValue = true;
+									// Use pre-calculated column total from pivot result (correct approach)
+									// This is already calculated by PivotEngine and contains the correct average for "Average"
+									const flatColKey = colKey.join(String.fromCharCode(0));
+									const colTotalData = this.pivotResult.colTotals?.[flatColKey]?.[aggregatorName];
+									if (colTotalData) {
+										totalValue = colTotalData.value;
+										// For "List Unique Values", the value is already a comma-separated string
+										// For numeric aggregations, round to 2 decimal places
+										const cleanAggName = aggregatorName.split('(')[0].trim().toLowerCase();
+										const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+										
+										if (!isStringAggregator && typeof totalValue === 'number') {
+											totalValue = roundNumericValue(totalValue);
 										}
-									});
-									if (hasValue) {
-										totalValue = sum;
-										// Round numeric value to 2 decimal places
-										totalValue = roundNumericValue(totalValue);
-										// Format the total value using the aggregator's format function
-										const sampleRowKey = rowKeys.find(rk => {
-											const flatRowKey = rk.join(String.fromCharCode(0));
+										
+										// Use formatted value if available, otherwise format manually
+										if (colTotalData.formatted) {
+											columnDisplay = {
+												formatted: colTotalData.formatted,
+												isEmpty: false
+											};
+										} else if (totalValue !== null && totalValue !== undefined) {
+											columnDisplay = {
+												formatted: String(totalValue),
+												isEmpty: false
+											};
+										} else {
+											columnDisplay = { formatted: '', isEmpty: true };
+										}
+									} else {
+										// Fallback: use applyAggregationToValues for different aggregation types
+										// This should only be used if colTotals is missing
+										const visibleValues = [];
+										rowKeys.forEach((rowKey) => {
+											const flatRowKey = rowKey.join(String.fromCharCode(0));
 											const flatColKey = colKey.join(String.fromCharCode(0));
-											return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
+											const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
+											if (cellData && cellData.value !== null && cellData.value !== undefined) {
+												visibleValues.push(cellData.value);
+											}
 										});
-										if (sampleRowKey) {
-											const flatRowKey = sampleRowKey.join(String.fromCharCode(0));
-											const flatColKey = colKey.join(String.fromCharCode(0));
-											const sampleCellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
-											// Try to get formatted value from sample cell, or format manually
-											if (sampleCellData && sampleCellData.formatted) {
-												// Use aggregator's format logic - for Count, use integer format; for Sum/Avg, use decimal format
-												if (aggregatorName === 'Count' || aggregatorName === 'count') {
-													columnDisplay = {
-														formatted: Math.round(totalValue).toLocaleString(),
-														isEmpty: false
-													};
-												} else {
-													columnDisplay = {
-														formatted: totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-														isEmpty: false
-													};
+										if (visibleValues.length > 0) {
+											totalValue = applyAggregationToValues(visibleValues, aggregatorName);
+											if (totalValue !== null && totalValue !== undefined) {
+												const cleanAggName = aggregatorName.split('(')[0].trim().toLowerCase();
+												const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+												if (!isStringAggregator && typeof totalValue === 'number') {
+													totalValue = roundNumericValue(totalValue);
 												}
-											} else {
 												columnDisplay = {
 													formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
 													isEmpty: totalValue === null || totalValue === undefined
 												};
 											}
-										} else {
-											columnDisplay = {
-												formatted: totalValue !== null && totalValue !== undefined ? String(totalValue) : '',
-												isEmpty: totalValue === null || totalValue === undefined
-											};
 										}
 									}
 								} else if (pivotData) {
@@ -1477,7 +1502,9 @@ function makeRenderer(opts = {}) {
 								);
 							});
 
-							if (this.rowTotal) {
+							// Only add grand totals column if there are column attributes
+							// When colAttrs.length === 0, we don't want the rightmost "Totals" column
+							if (this.rowTotal && colAttrs.length > 0) {
 								aggregatorList.forEach((aggName, aggIndex) => {
 									let grandValue = null;
 									let grandDisplay = { formatted: '', isEmpty: true };
@@ -1512,9 +1539,26 @@ function makeRenderer(opts = {}) {
 												grandDisplay = { formatted: '', isEmpty: true };
 											}
 										} else {
-											// Fallback: collect visible cell values (for edge cases)
-											const visibleValues = [];
-											rowKeys.forEach((rowKey) => {
+											// Fallback: if allTotal is missing, try to use pivotData if available
+											// This should rarely happen as allTotal should always be populated
+											// For Average, we cannot average cell values (which are already averages)
+											// So we must use the grand total aggregator from pivotData
+											if (pivotData) {
+												const grandTotalAggregator = pivotData.getAggregator([], [], aggName);
+												if (grandTotalAggregator && typeof grandTotalAggregator.value === "function") {
+													grandValue = grandTotalAggregator.value();
+													if (typeof grandValue === 'number') {
+														grandValue = roundNumericValue(grandValue);
+													}
+													grandDisplay = formatCellDisplay(grandTotalAggregator, grandValue);
+												} else {
+													grandDisplay = { formatted: '', isEmpty: true };
+												}
+											} else {
+												// Last resort: collect visible cell values (for edge cases)
+												// Note: This is incorrect for Average as it averages already-averaged values
+												const visibleValues = [];
+												rowKeys.forEach((rowKey) => {
 												columnDescriptors.forEach(({ colKey, aggregatorName }) => {
 													if (aggregatorName === aggName) {
 														const flatRowKey = rowKey.join(String.fromCharCode(0));
@@ -1525,61 +1569,42 @@ function makeRenderer(opts = {}) {
 														}
 													}
 												});
-											});
-											
-											// Apply aggregation method to visible values
-											grandValue = applyAggregationToValues(visibleValues, aggName);
-											
-											if (grandValue !== null && grandValue !== undefined) {
-												const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
-												const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+												});
 												
-												if (!isStringAggregator) {
-													grandValue = roundNumericValue(grandValue);
+												// Apply aggregation method to visible values
+												// Note: This is incorrect for Average as it averages already-averaged values
+												grandValue = applyAggregationToValues(visibleValues, aggName);
+												
+												if (grandValue !== null && grandValue !== undefined) {
+													const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+													const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
+													
+													if (!isStringAggregator) {
+														grandValue = roundNumericValue(grandValue);
+													}
+													
+													grandDisplay = {
+														formatted: String(grandValue),
+														isEmpty: false
+													};
+												} else {
+													grandDisplay = { formatted: '', isEmpty: true };
 												}
-												
-												grandDisplay = {
-													formatted: String(grandValue),
-													isEmpty: false
-												};
-											} else {
-												grandDisplay = { formatted: '', isEmpty: true };
 											}
 										}
 									} else if (pivotData) {
-										// Collect all visible cell values for this aggregator
-										const visibleValues = [];
-										let sampleAggregator = null;
-										rowKeys.forEach((rowKey) => {
-											columnDescriptors.forEach(({ colKey, aggregatorName }) => {
-												if (aggregatorName === aggName) {
-													const aggregator = pivotData.getAggregator(rowKey, colKey, aggName);
-													if (aggregator && typeof aggregator.value === "function") {
-														const value = aggregator.value();
-														if (value !== null && value !== undefined) {
-															visibleValues.push(value);
-															if (!sampleAggregator) {
-																sampleAggregator = aggregator;
-															}
-														}
-													}
-												}
-											});
-										});
-										
-										// Apply aggregation method to visible values
-										grandValue = applyAggregationToValues(visibleValues, aggName);
-										
-										if (grandValue !== null && grandValue !== undefined && sampleAggregator) {
-											// Check if this is a string aggregator (like List Unique Values)
-											const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
-											const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
-											
-											if (!isStringAggregator) {
-												// Round numeric value to 2 decimal places
+										// Use the pre-calculated grand total aggregator
+										// This is the correct way - the engine already calculated the grand total
+										const grandTotalAggregator = pivotData.getAggregator([], [], aggName);
+										if (grandTotalAggregator && typeof grandTotalAggregator.value === "function") {
+											grandValue = grandTotalAggregator.value();
+											// Round numeric value to 2 decimal places
+											if (typeof grandValue === 'number') {
 												grandValue = roundNumericValue(grandValue);
 											}
-											grandDisplay = formatCellDisplay(sampleAggregator, grandValue);
+											grandDisplay = formatCellDisplay(grandTotalAggregator, grandValue);
+										} else {
+											grandDisplay = { formatted: '', isEmpty: true };
 										}
 									}
 									const grandClasses = ["pvtGrandTotal"];
