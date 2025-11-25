@@ -1,5 +1,6 @@
 // Web Worker for pivot table calculations
-import { PivotData, aggregators } from '../utils/utils.js';
+import { PivotEngine } from '../utils/pivotEngine.js';
+import { aggregators } from '../utils/utils.js';
 
 // Threshold for using batch processing
 const BATCH_SIZE = 50000;
@@ -130,8 +131,8 @@ self.onmessage = async (e) => {
 		try {
 			const { data, rows, cols, vals, aggregatorNames, aggregatorVals, valueFilter, derivedAttributes, sorters, rowOrder, colOrder } = payload;
 
-			// Create PivotData instance in worker
-			const pivotData = new PivotData({
+			// Create PivotEngine instance in worker
+			const pivotData = new PivotEngine({
 				data,
 				rows,
 				cols,
@@ -184,9 +185,24 @@ self.onmessage = async (e) => {
 				result.rowTotals[flatRowKey] = {};
 				for (const aggName of aggregatorNamesList) {
 					const aggregator = pivotData.getAggregator(rowKey, [], aggName);
-					const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
-					const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
-					result.rowTotals[flatRowKey][aggName] = { value, formatted };
+					if (aggregator && typeof aggregator.value === 'function') {
+						const value = aggregator.value();
+						// Debug: log for List Unique Values to see what value we're getting
+						const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+						if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
+							console.log(`[Row Total Debug] Row key:`, rowKey, `Aggregator name:`, aggName, `Value:`, value, `Type:`, typeof value);
+							// Also check if aggregator has uniq array
+							if (aggregator.uniq) {
+								console.log(`[Row Total Debug] Aggregator uniq array:`, aggregator.uniq, `Length:`, aggregator.uniq.length);
+							}
+						}
+						// For "List Unique Values", ensure we get the raw value (comma-separated string)
+						// The format function should just return the value as-is
+						const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
+						result.rowTotals[flatRowKey][aggName] = { value, formatted };
+					} else {
+						result.rowTotals[flatRowKey][aggName] = { value: null, formatted: '' };
+					}
 				}
 			}
 

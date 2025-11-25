@@ -200,7 +200,7 @@ const usFmtPct = numberFormat({
 const aggregatorTemplates = {
 	count(formatter = usFmtInt) {
 		return () =>
-			function () {
+			function (data, rowKey, colKey) {
 				return {
 					count: 0,
 					push() {
@@ -217,19 +217,68 @@ const aggregatorTemplates = {
 
 	uniques(fn, formatter = usFmtInt) {
 		return function ([attr]) {
-			return function () {
+			return function (data, rowKey, colKey) {
+				// Store attr in closure so it's accessible in push method
+				const attrName = attr;
 				return {
 					uniq: [],
 					push(record) {
-						if (!Array.from(this.uniq).includes(record[attr])) {
-							this.uniq.push(record[attr]);
+						// Standard pivot table behavior for List Unique Values:
+						// 1. If attr is undefined/null, skip this record (no attribute to collect)
+						// 2. If attr is defined, get record[attr] (even if undefined/null - those are valid unique values)
+						if (attrName === undefined || attrName === null) {
+							return;
+						}
+						
+						// Get the value from the record (can be any type including undefined, null, NaN, objects)
+						const value = record[attrName];
+						
+						// Check if this value is already in the unique array
+						// Standard implementation uses strict equality with special handling for NaN
+						let isUnique = true;
+						for (let i = 0; i < this.uniq.length; i++) {
+							const existing = this.uniq[i];
+							// Special case: NaN comparison (NaN !== NaN in JavaScript)
+							if (typeof value === 'number' && typeof existing === 'number' && isNaN(value) && isNaN(existing)) {
+								isUnique = false;
+								break;
+							}
+							// Standard strict equality check
+							// This handles: null, undefined, primitives, objects (by reference)
+							if (value === existing) {
+								isUnique = false;
+								break;
+							}
+						}
+						// Add the value if it's unique
+						// Note: null, undefined, NaN, and objects are all valid unique values
+						if (isUnique) {
+							this.uniq.push(value);
 						}
 					},
+					// Expose uniq array for debugging
+					getUniqArray() {
+						return this.uniq;
+					},
 					value() {
-						return fn(this.uniq);
+						// Ensure we return the result of fn applied to the unique array
+						// For listUnique, fn is (x) => x.join(", "), so this returns a comma-separated string
+						if (this.uniq && this.uniq.length > 0 && typeof fn === 'function') {
+							const result = fn(this.uniq);
+							// Debug: log for List Unique Values aggregators
+							if (attrName && this.uniq.length > 0) {
+								const isListUnique = typeof result === 'string' && result.includes(',');
+								if (isListUnique || (this.uniq.length === 1 && attrName.includes('mark'))) {
+									console.log(`[Uniques Aggregator Debug] attrName: "${attrName}", uniq.length: ${this.uniq.length}, uniq:`, this.uniq, `result:`, result);
+								}
+							}
+							return result;
+						}
+						// Fallback: if uniq is empty or fn is not a function, return empty string
+						return '';
 					},
 					format: formatter,
-					numInputs: typeof attr !== "undefined" ? 0 : 1,
+					numInputs: typeof attrName !== "undefined" ? 0 : 1,
 				};
 			};
 		};
@@ -237,12 +286,17 @@ const aggregatorTemplates = {
 
 	sum(formatter = usFmt) {
 		return function ([attr]) {
-			return function () {
+			return function (data, rowKey, colKey) {
 				return {
 					sum: 0,
 					push(record) {
-						if (!isNaN(parseFloat(record[attr]))) {
-							this.sum += parseFloat(record[attr]);
+						// Handle undefined attr gracefully
+						if (attr === undefined || attr === null) {
+							return;
+						}
+						const value = record[attr];
+						if (value !== undefined && value !== null && !isNaN(parseFloat(value))) {
+							this.sum += parseFloat(value);
 						}
 					},
 					value() {
@@ -257,7 +311,7 @@ const aggregatorTemplates = {
 
 	extremes(mode, formatter = usFmt) {
 		return function ([attr]) {
-			return function (data) {
+			return function (data, rowKey, colKey) {
 				return {
 					val: null,
 					sorter: getSort(
@@ -265,7 +319,14 @@ const aggregatorTemplates = {
 						attr
 					),
 					push(record) {
+						// Handle undefined attr gracefully
+						if (attr === undefined || attr === null) {
+							return;
+						}
 						let x = record[attr];
+						if (x === undefined || x === null) {
+							return;
+						}
 						if (["min", "max"].includes(mode)) {
 							x = parseFloat(x);
 							if (!isNaN(x)) {
@@ -302,11 +363,19 @@ const aggregatorTemplates = {
 
 	quantile(q, formatter = usFmt) {
 		return function ([attr]) {
-			return function () {
+			return function (data, rowKey, colKey) {
 				return {
 					vals: [],
 					push(record) {
-						const x = parseFloat(record[attr]);
+						// Handle undefined attr gracefully
+						if (attr === undefined || attr === null) {
+							return;
+						}
+						const value = record[attr];
+						if (value === undefined || value === null) {
+							return;
+						}
+						const x = parseFloat(value);
 						if (!isNaN(x)) {
 							this.vals.push(x);
 						}
@@ -328,13 +397,21 @@ const aggregatorTemplates = {
 
 	runningStat(mode = "mean", ddof = 1, formatter = usFmt) {
 		return function ([attr]) {
-			return function () {
+			return function (data, rowKey, colKey) {
 				return {
 					n: 0.0,
 					m: 0.0,
 					s: 0.0,
 					push(record) {
-						const x = parseFloat(record[attr]);
+						// Handle undefined attr gracefully
+						if (attr === undefined || attr === null) {
+							return;
+						}
+						const value = record[attr];
+						if (value === undefined || value === null) {
+							return;
+						}
+						const x = parseFloat(value);
 						if (isNaN(x)) {
 							return;
 						}
@@ -374,16 +451,23 @@ const aggregatorTemplates = {
 
 	sumOverSum(formatter = usFmt) {
 		return function ([num, denom]) {
-			return function () {
+			return function (data, rowKey, colKey) {
 				return {
 					sumNum: 0,
 					sumDenom: 0,
 					push(record) {
-						if (!isNaN(parseFloat(record[num]))) {
-							this.sumNum += parseFloat(record[num]);
+						// Handle undefined fields gracefully
+						if (num !== undefined && num !== null) {
+							const numValue = record[num];
+							if (numValue !== undefined && numValue !== null && !isNaN(parseFloat(numValue))) {
+								this.sumNum += parseFloat(numValue);
+							}
 						}
-						if (!isNaN(parseFloat(record[denom]))) {
-							this.sumDenom += parseFloat(record[denom]);
+						if (denom !== undefined && denom !== null) {
+							const denomValue = record[denom];
+							if (denomValue !== undefined && denomValue !== null && !isNaN(parseFloat(denomValue))) {
+								this.sumDenom += parseFloat(denomValue);
+							}
 						}
 					},
 					value() {
@@ -469,8 +553,8 @@ const aggregatorTemplates = {
 					},
 					numInputs: wrappedNumInputs,
 				};
+				};
 			};
-		};
 	},
 };
 
@@ -608,387 +692,6 @@ const derivers = {
 	},
 };
 
-/*
-Data Model class
-*/
-
-class PivotData {
-	constructor(inputProps = {}) {
-		this.props = Object.assign({}, PivotData.defaultProps, inputProps);
-		this.aggregatorNames = this.resolveAggregatorNames();
-		// Use aggregatorVals if provided, otherwise fall back to single vals array
-		const aggregatorVals = this.props.aggregatorVals || {};
-		this.aggregatorFactories = this.aggregatorNames
-			.map((name) => {
-				const generator = this.props.aggregators[name];
-				if (typeof generator !== "function") {
-					return null;
-				}
-				// Use per-aggregator vals if available, otherwise use the shared vals array
-				const vals = aggregatorVals[name] || this.props.vals || [];
-				const factory = generator(vals);
-				if (typeof factory !== "function") {
-					return null;
-				}
-				return { name, factory };
-			})
-			.filter(Boolean);
-
-		if (!this.aggregatorFactories.length) {
-			const fallbackName = Object.keys(this.props.aggregators)[0];
-			if (fallbackName) {
-				// Use per-aggregator vals if available, otherwise use the shared vals array
-				const aggregatorVals = this.props.aggregatorVals || {};
-				const vals = aggregatorVals[fallbackName] || this.props.vals || [];
-				const fallbackFactory = this.props.aggregators[fallbackName](vals);
-				this.aggregatorFactories.push({
-					name: fallbackName,
-					factory: fallbackFactory,
-				});
-				this.aggregatorNames = [fallbackName];
-			}
-		}
-		this.aggregatorNames = this.aggregatorFactories.map((entry) => entry.name);
-
-		this.primaryAggregatorName = this.aggregatorNames[0] || null;
-		this.aggregator =
-			this.aggregatorFactories[0]?.factory ||
-			(() => PivotData.makeEmptyAggregator());
-		this.tree = {};
-		this.rowKeys = [];
-		this.colKeys = [];
-		this.rowTotals = {};
-		this.colTotals = {};
-		this.allTotal = this.createAggregatorCollection([], []);
-		this.sorted = false;
-		// iterate through input, accumulating data for cells
-		PivotData.forEachRecord(
-			this.props.data,
-			this.props.derivedAttributes,
-			(record) => {
-				if (this.filter(record)) {
-					this.processRecord(record);
-				}
-			}
-		);
-	}
-
-	resolveAggregatorNames() {
-		let names = [];
-		if (Array.isArray(this.props.aggregatorNames) && this.props.aggregatorNames.length) {
-			names = this.props.aggregatorNames.slice();
-		} else if (Array.isArray(this.props.aggregatorName)) {
-			names = this.props.aggregatorName.slice();
-		} else if (typeof this.props.aggregatorName === "string" && this.props.aggregatorName) {
-			names = [this.props.aggregatorName];
-		}
-		if (!names.length) {
-			const defaultName = Object.keys(this.props.aggregators)[0];
-			if (defaultName) {
-				names = [defaultName];
-			}
-		}
-		return names.filter((name, index, arr) => arr.indexOf(name) === index);
-	}
-
-	createAggregatorCollection(rowKey, colKey) {
-		const collection = {};
-		for (const entry of this.aggregatorFactories) {
-			const { name, factory } = entry;
-			collection[name] = factory(this, rowKey, colKey);
-		}
-		if (!Object.keys(collection).length && this.primaryAggregatorName) {
-			collection[this.primaryAggregatorName] = PivotData.makeEmptyAggregator();
-		}
-		return collection;
-	}
-
-	static makeEmptyAggregator() {
-		return {
-			push() {},
-			value() {
-				return null;
-			},
-			format() {
-				return "";
-			},
-		};
-	}
-
-	createEmptyCollection() {
-		const empty = {};
-		for (const name of this.aggregatorNames) {
-			empty[name] = PivotData.makeEmptyAggregator();
-		}
-		return empty;
-	}
-
-	pushRecord(collection, record) {
-		if (!collection) {
-			return;
-		}
-		for (const name in collection) {
-			const aggregator = collection[name];
-			if (aggregator && typeof aggregator.push === "function") {
-				aggregator.push(record);
-			}
-		}
-	}
-
-	filter(record) {
-		for (const k in this.props.valueFilter) {
-			if (record[k] in this.props.valueFilter[k]) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	forEachMatchingRecord(criteria, callback) {
-		return PivotData.forEachRecord(
-			this.props.data,
-			this.props.derivedAttributes,
-			(record) => {
-				if (!this.filter(record)) {
-					return;
-				}
-				for (const k in criteria) {
-					const v = criteria[k];
-					if (v !== (k in record ? record[k] : "null")) {
-						return;
-					}
-				}
-				callback(record);
-			}
-		);
-	}
-
-	arrSort(attrs) {
-		let a;
-		const sortersArr = (() => {
-			const result = [];
-			for (a of Array.from(attrs)) {
-				result.push(getSort(this.props.sorters, a));
-			}
-			return result;
-		})();
-		return function (a, b) {
-			for (const i of Object.keys(sortersArr || {})) {
-				const sorter = sortersArr[i];
-				const comparison = sorter(a[i], b[i]);
-				if (comparison !== 0) {
-					return comparison;
-				}
-			}
-			return 0;
-		};
-	}
-
-	sortKeys() {
-		if (!this.sorted) {
-			this.sorted = true;
-			const primary = this.primaryAggregatorName || this.aggregatorNames[0] || null;
-			const v = (r, c) => {
-				const aggregator = primary
-					? this.getAggregator(r, c, primary)
-					: this.getAggregator(r, c);
-				return aggregator && typeof aggregator.value === "function"
-					? aggregator.value()
-					: null;
-			};
-			switch (this.props.rowOrder) {
-				case "value_a_to_z":
-					this.rowKeys.sort((a, b) => naturalSort(v(a, []), v(b, [])));
-					break;
-				case "value_z_to_a":
-					this.rowKeys.sort((a, b) => -naturalSort(v(a, []), v(b, [])));
-					break;
-				default:
-					this.rowKeys.sort(this.arrSort(this.props.rows));
-			}
-			switch (this.props.colOrder) {
-				case "value_a_to_z":
-					this.colKeys.sort((a, b) => naturalSort(v([], a), v([], b)));
-					break;
-				case "value_z_to_a":
-					this.colKeys.sort((a, b) => -naturalSort(v([], a), v([], b)));
-					break;
-				default:
-					this.colKeys.sort(this.arrSort(this.props.cols));
-			}
-		}
-	}
-
-	getColKeys() {
-		this.sortKeys();
-		return this.colKeys;
-	}
-
-	getRowKeys() {
-		this.sortKeys();
-		return this.rowKeys;
-	}
-
-	processRecord(record) {
-		// this code is called in a tight loop - optimize for performance
-		const cols = this.props.cols;
-		const rows = this.props.rows;
-		const colKey = [];
-		const rowKey = [];
-		const separator = String.fromCharCode(0);
-		
-		// Optimize: use for loops instead of Array.from for better performance
-		for (let i = 0, len = cols.length; i < len; i++) {
-			const x = cols[i];
-			colKey.push(x in record ? record[x] : "null");
-		}
-		for (let i = 0, len = rows.length; i < len; i++) {
-			const x = rows[i];
-			rowKey.push(x in record ? record[x] : "null");
-		}
-		const flatRowKey = rowKey.join(separator);
-		const flatColKey = colKey.join(separator);
-
-		this.pushRecord(this.allTotal, record);
-
-		if (rowKey.length !== 0) {
-			if (!this.rowTotals[flatRowKey]) {
-				this.rowKeys.push(rowKey);
-				this.rowTotals[flatRowKey] = this.createAggregatorCollection(rowKey, []);
-			}
-			this.pushRecord(this.rowTotals[flatRowKey], record);
-		}
-
-		if (colKey.length !== 0) {
-			if (!this.colTotals[flatColKey]) {
-				this.colKeys.push(colKey);
-				this.colTotals[flatColKey] = this.createAggregatorCollection([], colKey);
-			}
-			this.pushRecord(this.colTotals[flatColKey], record);
-		}
-
-		if (colKey.length !== 0 && rowKey.length !== 0) {
-			if (!this.tree[flatRowKey]) {
-				this.tree[flatRowKey] = {};
-			}
-			if (!this.tree[flatRowKey][flatColKey]) {
-				this.tree[flatRowKey][flatColKey] = this.createAggregatorCollection(
-					rowKey,
-					colKey
-				);
-			}
-			this.pushRecord(this.tree[flatRowKey][flatColKey], record);
-		}
-	}
-
-	getAggregatorCollection(rowKey, colKey) {
-		let collection;
-		const flatRowKey = rowKey.join(String.fromCharCode(0));
-		const flatColKey = colKey.join(String.fromCharCode(0));
-		if (rowKey.length === 0 && colKey.length === 0) {
-			collection = this.allTotal;
-		} else if (rowKey.length === 0) {
-			collection = this.colTotals[flatColKey];
-		} else if (colKey.length === 0) {
-			collection = this.rowTotals[flatRowKey];
-		} else {
-			collection =
-				this.tree[flatRowKey] && this.tree[flatRowKey][flatColKey]
-					? this.tree[flatRowKey][flatColKey]
-					: null;
-		}
-		if (!collection) {
-			return this.createEmptyCollection();
-		}
-		return collection;
-	}
-
-	getAggregator(rowKey, colKey, aggregatorName) {
-		const collection = this.getAggregatorCollection(rowKey, colKey);
-
-		if (typeof aggregatorName === "string") {
-			return collection[aggregatorName] || PivotData.makeEmptyAggregator();
-		}
-
-		if (this.aggregatorNames.length === 1) {
-			const name = this.aggregatorNames[0];
-			return collection[name] || PivotData.makeEmptyAggregator();
-		}
-
-		return collection;
-	}
-
-	getAggregatorNames() {
-		return this.aggregatorNames.slice();
-	}
-}
-
-// can handle arrays or jQuery selections of tables
-PivotData.forEachRecord = function (input, derivedAttributes, f) {
-	let addRecord, record;
-	if (Object.getOwnPropertyNames(derivedAttributes).length === 0) {
-		addRecord = f;
-	} else {
-		addRecord = function (record) {
-			for (const k in derivedAttributes) {
-				const derived = derivedAttributes[k](record);
-				if (derived !== null) {
-					record[k] = derived;
-				}
-			}
-			return f(record);
-		};
-	}
-
-	// if it's a function, have it call us back
-	if (typeof input === "function") {
-		return input(addRecord);
-	} else if (Array.isArray(input)) {
-		if (Array.isArray(input[0])) {
-			// array of arrays
-			return (() => {
-				const result = [];
-				for (const i of Object.keys(input || {})) {
-					const compactRecord = input[i];
-					if (i > 0) {
-						record = {};
-						for (const j of Object.keys(input[0] || {})) {
-							const k = input[0][j];
-							record[k] = compactRecord[j];
-						}
-						result.push(addRecord(record));
-					}
-				}
-				return result;
-			})();
-		}
-
-		// array of objects
-		return (() => {
-			const result1 = [];
-			for (record of Array.from(input)) {
-				result1.push(addRecord(record));
-			}
-			return result1;
-		})();
-	}
-	throw new Error(__("unknown input format"));
-};
-
-PivotData.defaultProps = {
-	aggregators: aggregators,
-	cols: [],
-	rows: [],
-	vals: [],
-	aggregatorName: __("Count"),
-	aggregatorNames: [],
-	sorters: {},
-	valueFilter: {},
-	rowOrder: "key_a_to_z",
-	colOrder: "key_a_to_z",
-	derivedAttributes: {},
-};
-
 export {
 	aggregatorTemplates,
 	aggregators,
@@ -997,6 +700,5 @@ export {
 	naturalSort,
 	numberFormat,
 	getSort,
-	sortAs,
-	PivotData,
+	sortAs
 };

@@ -2,7 +2,8 @@ import common from "../utils/defaultProps.js";
 import DraggableAttribute from "./DraggableAttribute.js";
 import Dropdown from "./Dropdown.js";
 import Pivottable from "./Pivottable.js";
-import { PivotData, getSort, aggregators, sortAs } from "../utils/utils.js";
+import { PivotEngine, forEachRecord } from "../utils/pivotEngine.js";
+import { getSort, aggregators, sortAs } from "../utils/utils.js";
 import draggable from "vuedraggable";
 import TableRenderer from "./TableRenderer.js";
 import { h, shallowRef, computed, watch, nextTick, onUnmounted } from "vue";
@@ -632,7 +633,7 @@ export default {
 			const attrValues = {};
 			const materializedInput = [];
 			let recordsProcessed = 0;
-			PivotData.forEachRecord(
+			forEachRecord(
 				this.data,
 				this.derivedAttributes,
 				function (record) {
@@ -646,7 +647,9 @@ export default {
 						}
 					}
 					for (const attr in attrValues) {
-						const value = attr in record ? record[attr] : "null";
+						// Normalize null/undefined to "null" string for consistency with calculation engine
+						const rawValue = attr in record ? record[attr] : undefined;
+						const value = rawValue === null || rawValue === undefined ? "null" : rawValue;
 						if (!(value in attrValues[attr])) {
 							attrValues[attr][value] = 0;
 						}
@@ -934,7 +937,7 @@ export default {
 		performPivotCalculationSync() {
 			try {
 				const calcStartTime = performance.now();
-				const pivotData = new PivotData({
+				const pivotData = new PivotEngine({
 					data: this.materializedInput.value.length > 0 ? this.materializedInput.value : this.data,
 					rows: this.propsData.rows,
 					cols: this.propsData.cols,
@@ -988,9 +991,23 @@ export default {
 					result.rowTotals[flatRowKey] = {};
 					for (const aggName of aggregatorNamesList) {
 						const aggregator = pivotData.getAggregator(rowKey, [], aggName);
-						const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
-						const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
-						result.rowTotals[flatRowKey][aggName] = { value, formatted };
+						if (aggregator && typeof aggregator.value === 'function') {
+							const value = aggregator.value();
+							const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
+							result.rowTotals[flatRowKey][aggName] = { value, formatted };
+							// Debug: log for List Unique Values to verify stored value
+							const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+							if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
+								console.log(`[Row Total Storage] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
+								console.log(`[Row Total Storage] Value:`, value, `Type:`, typeof value);
+								console.log(`[Row Total Storage] Formatted:`, formatted, `Type:`, typeof formatted);
+								if (aggregator.uniq) {
+									console.log(`[Row Total Storage] Aggregator.uniq:`, aggregator.uniq, `Length:`, aggregator.uniq.length);
+								}
+							}
+						} else {
+							result.rowTotals[flatRowKey][aggName] = { value: null, formatted: '' };
+						}
 					}
 				}
 
