@@ -485,14 +485,16 @@ export default defineComponent({
 		});
 
 		return () => {
-			// Fixed chart area height: 500px (excluding legend and controls)
-			// Calculate total container height: legend + fixed gap + chart area + bottom controls
-			const chartAreaHeight = 500; // Fixed chart area height
+			// Fixed canvas height: 500px - this ensures the chart canvas always has the same height
+			const fixedCanvasHeight = 500;
+			
+			// Calculate total container height to accommodate legend and controls
+			// but the canvas itself will always be fixed at fixedCanvasHeight
 			const legendTopPx = 20; // Fixed top position for legend
 			const legendGapPx = 20; // Fixed gap between legend and chart
 			const bottomControlsHeight = 80; // Space for x-axis labels and dataZoom
 			
-			let totalHeight = legendTopPx + 40 + legendGapPx + chartAreaHeight + bottomControlsHeight; // Base structure
+			let totalHeight = legendTopPx + 40 + legendGapPx + fixedCanvasHeight + bottomControlsHeight; // Base structure
 			
 			// Use props.data directly - optimizations are already applied:
 			// - Top-N is applied after pivot calculation
@@ -524,7 +526,7 @@ export default defineComponent({
 					// Vertical legend: add height based on number of items
 					const legendItemCount = pieData.length;
 					const legendHeight = legendItemCount * 20 + 40; // Each item ~20px + padding
-					totalHeight = legendTopPx + legendHeight + legendGapPx + chartAreaHeight + bottomControlsHeight;
+					totalHeight = legendTopPx + legendHeight + legendGapPx + fixedCanvasHeight + bottomControlsHeight;
 				} else if (props.type === 'bar' || props.type === 'line') {
 					// For bar/line charts with horizontal legend
 					// Legend height is fixed at ~40px (single row) or more if multiple rows
@@ -541,10 +543,10 @@ export default defineComponent({
 						const estimatedLegendRows = Math.ceil(filteredDatasets.length / 5);
 						const legendHeight = estimatedLegendRows * 20 + 40; // Each row ~20px + padding
 						// Total height: legend + gap + fixed chart area + bottom controls
-						totalHeight = legendTopPx + legendHeight + legendGapPx + chartAreaHeight + bottomControlsHeight;
+						totalHeight = legendTopPx + legendHeight + legendGapPx + fixedCanvasHeight + bottomControlsHeight;
 					} else {
 						// No legend or single series
-						totalHeight = legendTopPx + legendGapPx + chartAreaHeight + bottomControlsHeight;
+						totalHeight = legendTopPx + legendGapPx + fixedCanvasHeight + bottomControlsHeight;
 					}
 					
 					// Account for rotated x-axis labels if there are many labels
@@ -572,7 +574,7 @@ export default defineComponent({
 					option: chartOption.value,
 					style: {
 						width: '100%',
-						height: '100%'
+						height: `${fixedCanvasHeight}px` // Fixed canvas height - always 500px
 					}
 				})
 			]);

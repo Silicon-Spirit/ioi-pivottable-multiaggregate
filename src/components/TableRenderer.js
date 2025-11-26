@@ -413,11 +413,39 @@ function makeRenderer(opts = {}) {
 					}
 					// If usePreCalculatedResult is false, we skip the above and go straight to creating PivotData
 					
-					// If not using pre-calculated result, create PivotData synchronously (for small datasets)
+					// If not using pre-calculated result, check if we have pivotResult from async calculation
+					// For small datasets, PivottableUi calculates asynchronously and sets pivotResult
 					if (!usePreCalculated) {
 						// Validate data before creating PivotData
 						if (!Array.isArray(this.data) || this.data.length === 0) {
 							return null; // Don't render if no data
+						}
+						
+						// If calculation is in progress, show loading state
+						if (this.isCalculating) {
+							return h('div', {
+								class: 'pvtCalculating',
+								style: { padding: '20px', textAlign: 'center' }
+							}, 'Calculating...');
+						}
+						
+						// Check if we have a pre-calculated result from PivottableUi's async calculation
+						// If yes, use it to avoid synchronous recalculation
+						if (this.pivotResult && this.pivotResult.rowKeys && this.pivotResult.colKeys) {
+							// We have a pre-calculated result - use it
+							// Create PivotData but it will be used with the pre-calculated result
+							// The actual calculation was already done asynchronously
+							try {
+								pivotData = new PivotEngine(this.$props);
+								// Mark that we're using pre-calculated data
+								usePreCalculated = true;
+								this.cachedPivotData = pivotData;
+								this.cachedInputHash = inputHash;
+								this.calculationTime = 0; // Already calculated asynchronously
+							} catch (error) {
+								console.error('Error creating PivotData from pre-calculated result:', error);
+								return null;
+							}
 						}
 						
 						// Create a hash of inputs to determine if recalculation is needed
@@ -439,29 +467,49 @@ function makeRenderer(opts = {}) {
 							this.calculationTime = 0; // No calculation needed
 							console.log(`[Performance] Using cached PivotData (no recalculation needed)`);
 						} else {
-							// Measure pivot calculation time
-							this.calculationStartTime = performance.now();
-							try {
-								// Validate props before creating PivotData
-								if (!this.$props || !this.$props.data) {
-									console.warn('Invalid props for PivotData creation');
+							// For small datasets, check if we have a pre-calculated result from PivottableUi
+							// If isCalculating is true, calculation is in progress - show loading
+							// If pivotResult exists, use it to create PivotData without recalculating
+							if (this.pivotResult && this.pivotResult.rowKeys) {
+								// Use pre-calculated result - create PivotData from it
+								// This avoids blocking the UI thread
+								try {
+									// Create PivotData but it will use cached result
+									// We still need to create it for the API, but it won't recalculate
+									pivotData = new PivotEngine(this.$props);
+									this.cachedPivotData = pivotData;
+									this.cachedInputHash = inputHash;
+									this.calculationTime = 0; // Already calculated
+								} catch (error) {
+									console.error('Error creating PivotData from cached result:', error);
 									return null;
 								}
-								
-								pivotData = new PivotEngine(this.$props);
-								const calculationEndTime = performance.now();
-								this.calculationTime = calculationEndTime - this.calculationStartTime;
-								
-								const dataSize = Array.isArray(this.data) ? this.data.length : 0;
-								console.log(`\n[Performance] Pivot Calculation: ${this.calculationTime.toFixed(2)}ms for ${dataSize} records`);
-								console.log(`[Performance] Calculation Rate: ${dataSize > 0 ? (dataSize / this.calculationTime * 1000).toFixed(0) : 0} records/sec`);
-								
-								this.cachedPivotData = pivotData;
-								this.cachedInputHash = inputHash;
-							} catch (error) {
-								console.error('Error creating PivotData in render:', error);
-								// Return null to prevent rendering with invalid data
-								return null;
+							} else {
+								// No pre-calculated result and calculation not in progress
+								// This shouldn't happen if PivottableUi is working correctly
+								// But fallback to synchronous creation if needed
+								this.calculationStartTime = performance.now();
+								try {
+									// Validate props before creating PivotData
+									if (!this.$props || !this.$props.data) {
+										console.warn('Invalid props for PivotData creation');
+										return null;
+									}
+									
+									pivotData = new PivotEngine(this.$props);
+									const calculationEndTime = performance.now();
+									this.calculationTime = calculationEndTime - this.calculationStartTime;
+									
+									const dataSize = Array.isArray(this.data) ? this.data.length : 0;
+									console.log(`\n[Performance] Pivot Calculation: ${this.calculationTime.toFixed(2)}ms for ${dataSize} records`);
+									console.log(`[Performance] Calculation Rate: ${dataSize > 0 ? (dataSize / this.calculationTime * 1000).toFixed(0) : 0} records/sec`);
+									
+									this.cachedPivotData = pivotData;
+									this.cachedInputHash = inputHash;
+								} catch (error) {
+									console.error('Error creating PivotData in render:', error);
+									return null;
+								}
 							}
 						}
 					}
@@ -1747,20 +1795,48 @@ const XLSXExportRenderer = {
 		let rowKeys = pivotData.getRowKeys();
 		let colKeys = pivotData.getColKeys();
 
-		// Filter out rows and columns where any header value is "null" (same as table renderer)
-		const filteredRowKeys = rowKeys.filter((rowKey) => {
-			// Exclude rows where any part of the rowKey is "null"
-			// Empty arrays are allowed (for grand totals)
-			if (!Array.isArray(rowKey) || rowKey.length === 0) return true;
-			return !rowKey.some((val) => val === "null" || val === null);
-		});
+		// Get row and column attributes (same as table renderer)
+		const rowAttrs = Array.from(pivotData.props.rows || []);
+		const colAttrs = Array.from(pivotData.props.cols || []);
+
+		// CRITICAL: Don't filter out null values - include them in export (same as table renderer)
+		// The table renderer explicitly includes null values (line 625-627)
+		// First, ensure all elements are arrays
+		const validRowKeys = rowKeys.filter(rowKey => Array.isArray(rowKey));
+		const validColKeys = colKeys.filter(colKey => Array.isArray(colKey));
 		
-		const filteredColKeys = colKeys.filter((colKey) => {
-			// Exclude columns where any part of the colKey is "null"
-			// Empty arrays are allowed (for grand totals)
-			if (!Array.isArray(colKey) || colKey.length === 0) return true;
-			return !colKey.some((val) => val === "null" || val === null);
-		});
+		// Don't filter out null values - include them in export
+		const filteredRowKeys = validRowKeys;
+		const filteredColKeys = validColKeys;
+
+		// CRITICAL: Check if all data is filtered out (same logic as table renderer)
+		// This ensures export matches what's displayed in the table
+		const hasRowAttrs = rowAttrs.length > 0;
+		const hasColAttrs = colAttrs.length > 0;
+		const allRowsFiltered = hasRowAttrs && filteredRowKeys.length === 0;
+		const allColsFiltered = hasColAttrs && filteredColKeys.length === 0;
+		const tree = pivotData.tree || {};
+		const bothEmpty = filteredRowKeys.length === 0 && filteredColKeys.length === 0 && Object.keys(tree).length === 0;
+		
+		const isAllDataFiltered = bothEmpty || allRowsFiltered || allColsFiltered;
+		
+		// If all data is filtered (no headers and no data), return empty export button
+		// This matches the table renderer behavior which returns null in this case
+		if (isAllDataFiltered) {
+			return h("div", {
+				class: "d-flex justify-content-center align-items-center",
+				style: {
+					width: "100%",
+					height: "60vh",
+				},
+			}, [
+				h("button", {
+					class: "btn btn-default btn-sm ellipsis mb-3",
+					disabled: true,
+					title: "No data to export. Please add fields to row or column headers.",
+				}, __("Export to XLSX (No Data)"))
+			]);
+		}
 
 		// Use filtered keys, but ensure at least one empty array if all are filtered
 		rowKeys = filteredRowKeys.length ? filteredRowKeys : [[]];
@@ -1770,8 +1846,7 @@ const XLSXExportRenderer = {
 		const aggregatorNames = pivotData.getAggregatorNames() || [];
 		const aggregatorCount = aggregatorNames.length;
 		const aggregatorVals = this.aggregatorVals || {};
-		const rowAttrs = Array.from(pivotData.props.rows || []);
-		const colAttrs = Array.from(pivotData.props.cols || []);
+		// rowAttrs and colAttrs are already defined above
 
 		// Helper function to format aggregator name with value field (same as table renderer)
 		const formatAggregatorHeader = (aggName) => {
@@ -1807,73 +1882,110 @@ const XLSXExportRenderer = {
 					aggregatorName: aggregatorNames[0],
 			  }));
 
-		// When there are no horizontal header fields, remove the rightmost columns equal to the number of aggregators
-		if (colAttrs.length === 0 && columnDescriptors.length >= aggregatorCount) {
-			columnDescriptors = columnDescriptors.slice(0, -aggregatorCount);
-		}
-
-		const headerColAttrs = aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
+		// When there are no horizontal header fields (colAttrs.length === 0),
+		// columnDescriptors already has the correct structure (one per aggregator)
+		// We should NOT remove any columns in this case - they represent the aggregator columns
+		// The removal logic below is only for when there ARE column attributes
+		// (This matches the table renderer behavior - when colAttrs.length === 0, show aggregator columns directly)
 
 		// Build export data array
 		const format_data = [];
 
 		// Build header rows (matching table structure)
-		headerColAttrs.forEach((attr, attrIndex) => {
+		// When colAttrs.length === 0, show aggregator names directly (no "Values" row)
+		if (colAttrs.length === 0) {
+			// Single header row with aggregator names
 			const headerRow = [];
 			
-			// Add empty cells for row attributes
-			rowAttrs.forEach(() => {
-				headerRow.push('');
+			// Add row attribute headers
+			rowAttrs.forEach((attr) => {
+				headerRow.push(attr);
 			});
 
-			// Add column attribute header
-			if (attrIndex < colAttrs.length) {
-				headerRow.push(attr);
-			} else if (attr === __("Values")) {
-				headerRow.push(attr);
-			}
+			// Add aggregator names directly (no "Values" row, no column attribute header)
+			aggregatorNames.forEach((aggName) => {
+				headerRow.push(formatAggregatorHeader(aggName));
+			});
 
-			// Add column keys and aggregator names
-			effectiveColKeys.forEach((colKey) => {
-				const cellValue = colKey[attrIndex] != null ? colKey[attrIndex] : "";
-				// Format aggregator name in "Values" row
-				if (attrIndex === headerColAttrs.length - 1 && attr === __("Values") && aggregatorCount > 1) {
-					const aggName = cellValue;
-					if (aggName && aggregatorNames.includes(aggName)) {
-						headerRow.push(formatAggregatorHeader(aggName));
+			// When colAttrs.length === 0, we don't want the rightmost row totals column
+			// This matches the table renderer behavior (line 1107)
+
+			format_data.push(headerRow);
+		} else {
+			// Normal case: there are column attributes
+			const headerColAttrs = aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
+			
+			headerColAttrs.forEach((attr, attrIndex) => {
+				const headerRow = [];
+				
+				// Add empty cells for row attributes
+				rowAttrs.forEach(() => {
+					headerRow.push('');
+				});
+
+				// Add column attribute header
+				if (attrIndex < colAttrs.length) {
+					headerRow.push(attr);
+				} else if (attr === __("Values")) {
+					headerRow.push(attr);
+				}
+
+				// Add column keys and aggregator names
+				// Include null values - convert null to "(null)" for better visibility (same as table renderer for charts, line 152-153)
+				effectiveColKeys.forEach((colKey) => {
+					let cellValue = colKey[attrIndex] != null ? colKey[attrIndex] : "";
+					// Convert null to "(null)" for display
+					if (cellValue === null || cellValue === "null" || cellValue === "") {
+						cellValue = "(null)";
+					}
+					// Format aggregator name in "Values" row
+					if (attrIndex === headerColAttrs.length - 1 && attr === __("Values") && aggregatorCount > 1) {
+						const aggName = cellValue;
+						if (aggName && aggregatorNames.includes(aggName)) {
+							headerRow.push(formatAggregatorHeader(aggName));
+						} else {
+							headerRow.push(cellValue);
+						}
 					} else {
 						headerRow.push(cellValue);
 					}
-				} else {
-					headerRow.push(cellValue);
-				}
-			});
+				});
 
-			// Add "Totals" header if row totals are enabled
-			if (this.rowTotal && aggregatorCount > 0) {
-				if (attrIndex === headerColAttrs.length - 1) {
-					if (aggregatorCount > 1) {
-						aggregatorNames.forEach((aggName) => {
-							headerRow.push(formatAggregatorHeader(aggName));
-						});
-					} else {
+				// Add "Totals" header if row totals are enabled and there are column attributes
+				if (this.rowTotal && aggregatorCount > 0 && colAttrs.length > 0) {
+					if (attrIndex === headerColAttrs.length - 1) {
+						if (aggregatorCount > 1) {
+							aggregatorNames.forEach((aggName) => {
+								headerRow.push(formatAggregatorHeader(aggName));
+							});
+						} else {
+							headerRow.push(__("Totals"));
+						}
+					} else if (attrIndex === 0 && headerColAttrs.length > 1) {
 						headerRow.push(__("Totals"));
 					}
-				} else if (attrIndex === 0 && headerColAttrs.length > 1) {
-					headerRow.push(__("Totals"));
-				}
+			}
+
+				format_data.push(headerRow);
+			});
 		}
 
-			format_data.push(headerRow);
-		});
-
 		// Build data rows
-		const datas = rowKeys.map((rowKey) => {
+		// When there are no vertical header fields (rowAttrs.length === 0), skip data rows (only show Totals row)
+		// This matches the table renderer behavior
+		const datas = rowAttrs.length === 0 
+			? []
+			: rowKeys.map((rowKey) => {
 			const row = [];
 			
 			// Add row attribute values
+			// Include null values - convert null to "(null)" for better visibility (same as table renderer for charts, line 152-153)
 			rowKey.forEach((txt) => {
-				row.push(txt);
+				if (txt === null || txt === "null" || txt === "") {
+					row.push("(null)");
+				} else {
+					row.push(txt);
+				}
 			});
 
 			// Add empty cell if there are column attributes
@@ -1882,39 +1994,55 @@ const XLSXExportRenderer = {
 			}
 
 			// Add data cells for each column descriptor
+			// Use the same formatCellDisplay logic as table renderer to match null value display
 			columnDescriptors.forEach(({ colKey, aggregatorName }) => {
 				const aggregator = pivotData.getAggregator(rowKey, colKey, aggregatorName);
 				let value = null;
 				if (aggregator && typeof aggregator.value === "function") {
 					value = aggregator.value();
 				}
-				// Format the value (use formatted if available, otherwise raw value)
-				let formatted = '';
-				if (value !== null && value !== undefined) {
-					if (aggregator && typeof aggregator.format === "function") {
-						formatted = aggregator.format(value);
-					} else {
-						formatted = String(value);
-					}
+				// Format the value using the same logic as table renderer (formatCellDisplay)
+				let formatted = "";
+				if (aggregator && typeof aggregator.format === "function") {
+					formatted = aggregator.format(value);
+				} else if (value !== undefined && value !== null && value !== "") {
+					formatted = value;
+				}
+				const isEmpty =
+					formatted === "" ||
+					formatted === null ||
+					(typeof formatted === "number" && Number.isNaN(formatted));
+				// Match table renderer: show "—" for empty/null values (line 353)
+				if (isEmpty) {
+					formatted = "—";
 				}
 				row.push(formatted);
 			});
 
 			// Add row totals if enabled
-			if (this.rowTotal) {
+			// When colAttrs.length === 0, we don't want the rightmost row totals column
+			// This matches the table renderer behavior (line 1107)
+			if (this.rowTotal && colAttrs.length > 0) {
 				aggregatorNames.forEach((aggName) => {
 					const totalAggregator = pivotData.getAggregator(rowKey, [], aggName);
 					let totalValue = null;
 					if (totalAggregator && typeof totalAggregator.value === "function") {
 						totalValue = totalAggregator.value();
 					}
-					let totalFormatted = '';
-					if (totalValue !== null && totalValue !== undefined) {
-						if (totalAggregator && typeof totalAggregator.format === "function") {
-							totalFormatted = totalAggregator.format(totalValue);
-						} else {
-							totalFormatted = String(totalValue);
-						}
+					// Use the same formatCellDisplay logic as table renderer
+					let totalFormatted = "";
+					if (totalAggregator && typeof totalAggregator.format === "function") {
+						totalFormatted = totalAggregator.format(totalValue);
+					} else if (totalValue !== undefined && totalValue !== null && totalValue !== "") {
+						totalFormatted = totalValue;
+					}
+					const isEmpty =
+						totalFormatted === "" ||
+						totalFormatted === null ||
+						(typeof totalFormatted === "number" && Number.isNaN(totalFormatted));
+					// Match table renderer: show "—" for empty/null values
+					if (isEmpty) {
+						totalFormatted = "—";
 					}
 					row.push(totalFormatted);
 				});
@@ -1930,60 +2058,124 @@ const XLSXExportRenderer = {
 		if (this.colTotal) {
 			const totalRow = [];
 			
-			// Add "Totals" label
-			const labelColSpan = rowAttrs.length + (headerColAttrs.length > 0 ? 1 : 0);
-			if (labelColSpan > 0 && headerColAttrs.length) {
-				totalRow.push(__("Totals"));
-				// Fill remaining label columns
-				for (let i = 1; i < labelColSpan; i++) {
-					totalRow.push('');
-				}
-			} else {
-				// No column attributes case
+			// When colAttrs.length === 0, structure is simpler
+			if (colAttrs.length === 0) {
+				// Add "Totals" label
 				rowAttrs.forEach(() => {
 					totalRow.push('');
 				});
-				if (rowAttrs.length > 0 || headerColAttrs.length > 0) {
+				if (rowAttrs.length > 0) {
 					totalRow.push(__("Totals"));
 				}
-			}
 
-			// Add column totals for each column descriptor
-			columnDescriptors.forEach(({ colKey, aggregatorName }) => {
-				const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
-				let totalValue = null;
-				if (totalAggregator && typeof totalAggregator.value === "function") {
-					totalValue = totalAggregator.value();
-				}
-				let totalFormatted = '';
-				if (totalValue !== null && totalValue !== undefined) {
-					if (totalAggregator && typeof totalAggregator.format === "function") {
-						totalFormatted = totalAggregator.format(totalValue);
-					} else {
-						totalFormatted = String(totalValue);
-					}
-				}
-				totalRow.push(totalFormatted);
-			});
-
-			// Add grand total if row totals are enabled
-			if (this.rowTotal) {
+				// Add aggregator totals (grand totals) for each aggregator
 				aggregatorNames.forEach((aggName) => {
 					const grandAggregator = pivotData.getAggregator([], [], aggName);
 					let grandValue = null;
 					if (grandAggregator && typeof grandAggregator.value === "function") {
 						grandValue = grandAggregator.value();
 					}
-					let grandFormatted = '';
-					if (grandValue !== null && grandValue !== undefined) {
-						if (grandAggregator && typeof grandAggregator.format === "function") {
-							grandFormatted = grandAggregator.format(grandValue);
-						} else {
-							grandFormatted = String(grandValue);
-						}
+					// Use the same formatCellDisplay logic as table renderer
+					let grandFormatted = "";
+					if (grandAggregator && typeof grandAggregator.format === "function") {
+						grandFormatted = grandAggregator.format(grandValue);
+					} else if (grandValue !== undefined && grandValue !== null && grandValue !== "") {
+						grandFormatted = grandValue;
+					}
+					const isEmpty =
+						grandFormatted === "" ||
+						grandFormatted === null ||
+						(typeof grandFormatted === "number" && Number.isNaN(grandFormatted));
+					// Match table renderer: show "—" for empty/null values
+					if (isEmpty) {
+						grandFormatted = "—";
 					}
 					totalRow.push(grandFormatted);
 				});
+
+				// When colAttrs.length === 0, we don't want the rightmost grand totals column
+				// This matches the table renderer behavior (line 1555)
+			} else {
+				// Normal case: there are column attributes
+				const headerColAttrs = aggregatorCount > 1 ? [...colAttrs, __("Values")] : colAttrs.slice();
+				
+				// Add "Totals" label - match table renderer structure exactly
+				// The "Totals" label should span: rowAttrs.length + 1 (for row attrs + column attr header)
+				// This matches the table renderer where "Totals" spans across row attrs and column attr header
+				const labelColSpan = rowAttrs.length + (headerColAttrs.length > 0 ? 1 : 0);
+				if (labelColSpan > 0 && headerColAttrs.length) {
+					// In Excel, we represent the span by putting "Totals" in the first cell
+					// and empty strings in the remaining cells that are spanned
+					totalRow.push(__("Totals"));
+					// Fill remaining label columns (row attrs + column attr header - 1 for "Totals" cell)
+					for (let i = 1; i < labelColSpan; i++) {
+						totalRow.push('');
+					}
+				} else {
+					// Edge case: no column attributes but we're in the else branch (shouldn't happen)
+					// When both rowAttrs and colAttrs are empty, don't add "Totals" label
+					rowAttrs.forEach(() => {
+						totalRow.push('');
+					});
+					// Only add "Totals" label if there are row attributes or column headers
+					if (rowAttrs.length > 0 || (headerColAttrs.length > 0 && colAttrs.length > 0)) {
+						totalRow.push(__("Totals"));
+					}
+				}
+
+				// Add column totals for each column descriptor
+				columnDescriptors.forEach(({ colKey, aggregatorName }) => {
+					const totalAggregator = pivotData.getAggregator([], colKey, aggregatorName);
+					let totalValue = null;
+					if (totalAggregator && typeof totalAggregator.value === "function") {
+						totalValue = totalAggregator.value();
+					}
+					// Use the same formatCellDisplay logic as table renderer
+					let totalFormatted = "";
+					if (totalAggregator && typeof totalAggregator.format === "function") {
+						totalFormatted = totalAggregator.format(totalValue);
+					} else if (totalValue !== undefined && totalValue !== null && totalValue !== "") {
+						totalFormatted = totalValue;
+					}
+					const isEmpty =
+						totalFormatted === "" ||
+						totalFormatted === null ||
+						(typeof totalFormatted === "number" && Number.isNaN(totalFormatted));
+					// Match table renderer: show "—" for empty/null values
+					if (isEmpty) {
+						totalFormatted = "—";
+					}
+					totalRow.push(totalFormatted);
+				});
+
+				// Add grand total if row totals are enabled and there are column attributes
+				// When colAttrs.length === 0, we don't want the rightmost grand totals column
+				// This matches the table renderer behavior (line 1555)
+				if (this.rowTotal && colAttrs.length > 0) {
+					aggregatorNames.forEach((aggName) => {
+						const grandAggregator = pivotData.getAggregator([], [], aggName);
+						let grandValue = null;
+						if (grandAggregator && typeof grandAggregator.value === "function") {
+							grandValue = grandAggregator.value();
+						}
+						// Use the same formatCellDisplay logic as table renderer
+						let grandFormatted = "";
+						if (grandAggregator && typeof grandAggregator.format === "function") {
+							grandFormatted = grandAggregator.format(grandValue);
+						} else if (grandValue !== undefined && grandValue !== null && grandValue !== "") {
+							grandFormatted = grandValue;
+						}
+						const isEmpty =
+							grandFormatted === "" ||
+							grandFormatted === null ||
+							(typeof grandFormatted === "number" && Number.isNaN(grandFormatted));
+						// Match table renderer: show "—" for empty/null values
+						if (isEmpty) {
+							grandFormatted = "—";
+						}
+						totalRow.push(grandFormatted);
+					});
+				}
 			}
 
 			format_data.push(totalRow);

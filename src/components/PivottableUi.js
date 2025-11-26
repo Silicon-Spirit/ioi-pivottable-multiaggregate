@@ -96,6 +96,10 @@ export default {
 				return [];
 			},
 		},
+		validateColumnDrop: {
+			type: Function,
+			default: null,
+		},
 		menuLimit: {
 			type: Number,
 			default: 500,
@@ -251,10 +255,17 @@ export default {
 		// Data changes are handled by watch
 	},
 	created() {
+		// Ensure pivotResult is always initialized as a valid shallowRef
+		// This prevents "Cannot set properties of null" errors
+		// Check if pivotResult exists and is a valid object with 'value' property
+		if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
+			this.pivotResult = shallowRef(null);
+		}
+		
 		this.materializeInput(this.data);
 		this.propsData.vals = this.vals.slice();
-		this.propsData.rows = this.rows;
-		this.propsData.cols = this.cols;
+		this.propsData.rows = [...this.rows];
+		this.propsData.cols = [...this.cols];
 		// Initialize aggregatorVals if not already set
 		if (!this.propsData.aggregatorVals || Object.keys(this.propsData.aggregatorVals).length === 0) {
 			this.propsData.aggregatorVals = {};
@@ -305,8 +316,8 @@ export default {
 			
 			this.materializeInput(this.data);
 			this.propsData.vals = this.vals.slice();
-			this.propsData.rows = this.rows;
-			this.propsData.cols = this.cols;
+			this.propsData.rows = [...this.rows];
+			this.propsData.cols = [...this.cols];
 			this.unusedOrder = this.unusedAttrs;
 			Object.keys(this.attrValues.value || {}).map(this.assignValue);
 			Object.keys(this.openStatus).map(this.assignValue);
@@ -676,6 +687,10 @@ export default {
 			this.calculatePivot();
 		},
 		calculatePivot(isInitial = false) {
+			// Always set calculating state immediately to show loading indicator
+			// This ensures smooth UI even for small datasets
+			this.isCalculating = true;
+			
 			// For initial calculation, don't debounce - start immediately
 			// For subsequent changes, debounce to avoid excessive worker calls
 			if (isInitial) {
@@ -684,25 +699,14 @@ export default {
 					clearTimeout(this.debounceTimer);
 					this.debounceTimer = null;
 				}
-				// Start calculation immediately and set calculating state
-				this.performPivotCalculation();
+				// Use nextTick to allow UI to update before starting calculation
+				nextTick(() => {
+					this.performPivotCalculation();
+				});
 			} else {
 				// Debounce subsequent calculations
 				if (this.debounceTimer) {
 					clearTimeout(this.debounceTimer);
-				}
-
-				// Set calculating state immediately if we're going to use worker
-				// This ensures TableRenderer shows "Calculating..." even during debounce
-				if (Array.isArray(this.data) && this.data.length >= WORKER_THRESHOLD) {
-					const hasFunctionDerivedAttrs = Object.keys(this.derivedAttributes || {}).length > 0 && 
-						Object.values(this.derivedAttributes || {}).some(attr => typeof attr === 'function');
-					const hasFunctionSorters = Object.keys(this.sorters || {}).length > 0 && 
-						Object.values(this.sorters || {}).some(sorter => typeof sorter === 'function');
-					
-					if (pivotWorkerManager.isAvailable() && !hasFunctionDerivedAttrs && !hasFunctionSorters) {
-						this.isCalculating = true;
-					}
 				}
 
 				this.debounceTimer = setTimeout(async () => {
@@ -774,9 +778,12 @@ export default {
 						// Use cached worker result
 						console.log(`[Cache] Using cached worker result (${this.data.length} records, cache size: ${this.workerResultCache.size})`);
 						
-						if (this.pivotResult) {
-							this.pivotResult.value = cachedResult;
-						}
+					// CRITICAL: Ensure pivotResult is initialized before setting value
+					// Check existence first to avoid "Cannot read property 'value' of null" errors
+					if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
+						this.pivotResult = shallowRef(null);
+					}
+					this.pivotResult.value = cachedResult;
 						this.isCalculating = false;
 						return;
 					}
@@ -913,9 +920,12 @@ export default {
 					// Cache the worker result in LRU cache
 					this.workerResultCache.set(configHash, JSON.parse(JSON.stringify(result))); // Deep copy
 					
-					if (this.pivotResult) {
-						this.pivotResult.value = result;
+					// CRITICAL: Ensure pivotResult is initialized before setting value
+					// Check existence first to avoid "Cannot read property 'value' of null" errors
+					if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
+						this.pivotResult = shallowRef(null);
 					}
+					this.pivotResult.value = result;
 				} catch (error) {
 					console.error('Worker calculation error, falling back to sync:', error);
 					this.calculationError = error;
@@ -925,17 +935,32 @@ export default {
 					this.isCalculating = false;
 				}
 			} else {
-				// For small datasets, don't use pivotResult - TableRenderer will create pivotData directly
-				// Clear any existing pivotResult from previous large dataset calculations
-				if (this.pivotResult) {
-					this.pivotResult.value = null;
-				}
-				// TableRenderer will handle synchronous calculation in its render function
-				// No need to pre-calculate here
+				// For small datasets, still calculate asynchronously to prevent UI freezing
+				// This ensures TableRenderer shows loading state and doesn't block UI
+				// Calculate and set pivotResult so TableRenderer can use it instead of recalculating
+				setTimeout(async () => {
+					await this.performPivotCalculationSync();
+					// isCalculating is already set to false in performPivotCalculationSync's finally block
+				}, 0);
+				// Don't return here - let isCalculating flag prevent TableRenderer from rendering synchronously
 			}
 		},
-		performPivotCalculationSync() {
+		async performPivotCalculationSync() {
+			// CRITICAL: Ensure pivotResult is always a valid shallowRef object
+			// Store in local variable immediately to avoid reactivity issues
+			// This must be done synchronously before any async operations
+			if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
+				this.pivotResult = shallowRef(null);
+			}
+			// Store reference in local variable to avoid multiple property accesses
+			// Use let instead of const so we can reassign if needed
+			let pivotResultRef = this.pivotResult;
+			
 			try {
+				// Use setTimeout to yield control to browser, allowing UI to update
+				// This prevents UI freezing during calculation
+				await new Promise(resolve => setTimeout(resolve, 0));
+				
 				const calcStartTime = performance.now();
 				const pivotData = new PivotEngine({
 					data: this.materializedInput.value.length > 0 ? this.materializedInput.value : this.data,
@@ -1038,17 +1063,34 @@ export default {
 					const aggregator = pivotData.getAggregator([], [], aggName);
 					const value = aggregator && typeof aggregator.value === 'function' ? aggregator.value() : null;
 					const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
-					result.allTotal[aggName] = { value, formatted };
-				}
-
-				this.pivotResult.value = result;
-			} catch (error) {
-				console.error('Synchronous pivot calculation error:', error);
-				this.calculationError = error;
-				if (this.pivotResult) {
-					this.pivotResult.value = null;
-				}
+				result.allTotal[aggName] = { value, formatted };
 			}
+
+			// CRITICAL: Re-check pivotResult after async operations
+			// Use the local reference stored at the start of the function
+			// If pivotResultRef is still valid, use it; otherwise re-initialize
+			if (!pivotResultRef || typeof pivotResultRef !== 'object' || !('value' in pivotResultRef)) {
+				// Re-initialize if the local reference is invalid
+				pivotResultRef = shallowRef(null);
+				this.pivotResult = pivotResultRef;
+			}
+			
+			// Use the local reference to set the value - this avoids accessing this.pivotResult
+			// which might have been reset by Vue's reactivity system
+			pivotResultRef.value = result;
+		} catch (error) {
+			console.error('Synchronous pivot calculation error:', error);
+			this.calculationError = error;
+			// Use the local reference if available, otherwise check this.pivotResult
+			if (pivotResultRef && typeof pivotResultRef === 'object' && 'value' in pivotResultRef) {
+				pivotResultRef.value = null;
+			} else if (this.pivotResult && typeof this.pivotResult === 'object' && 'value' in this.pivotResult) {
+				this.pivotResult.value = null;
+			}
+		} finally {
+			// Ensure calculating state is cleared
+			this.isCalculating = false;
+		}
 		},
 		showNotification(message, type = "info") {
 			// Clear existing timer
@@ -1081,6 +1123,47 @@ export default {
 					tag: "td",
 					class: classes,
 					onSort: onChange.bind(this),
+					onMove: (evt) => {
+						// onMove is called BEFORE the move happens
+						// We can validate here and return false to prevent the move
+						// CRITICAL: Check if evt and draggedContext exist before accessing properties
+						if (!evt || !evt.draggedContext || !evt.to || !evt.from) {
+							// Invalid event - allow the move to proceed normally
+							return true;
+						}
+						
+						if (evt.to.classList.contains("pvtCols") && this.validateColumnDrop) {
+							// Ensure draggedContext has the required properties
+							if (!evt.draggedContext.element || typeof evt.draggedContext.futureIndex === 'undefined') {
+								// Invalid draggedContext - allow the move
+								return true;
+							}
+							
+							const item = evt.draggedContext.element;
+							const currentCols = [...this.cols];
+							// Calculate the new index
+							let newIndex = evt.draggedContext.futureIndex;
+							if (evt.from.classList.contains("pvtCols")) {
+								// Moving within pvtCols - adjust index
+								const oldIndex = evt.draggedContext.index;
+								if (typeof oldIndex !== 'undefined' && oldIndex < newIndex) {
+									newIndex = newIndex - 1;
+								}
+							}
+							const validation = this.validateColumnDrop(item, currentCols, newIndex);
+							if (!validation.allowed) {
+								// Return false to prevent the move completely
+								// This should prevent vuedraggable from updating the list
+								// Also prevent default and stop propagation to be extra safe
+								if (evt.originalEvent) {
+									evt.originalEvent.preventDefault();
+									evt.originalEvent.stopPropagation();
+								}
+								return false;
+							}
+						}
+						return true; // Allow the move
+					},
 					itemKey: (x) => x,
 				},
 				{
@@ -1449,13 +1532,109 @@ export default {
 					}
 				}
 				
+				// Store original state before making any changes
+				const originalCols = [...this.cols];
+				const originalPropsCols = [...this.propsData.cols];
+				
+				// If dropping to pvtCols, validate FIRST before any changes
+				if (e.to.classList.contains("pvtCols") && this.validateColumnDrop) {
+					// Calculate the proposed state
+					let proposedCols = [...originalCols];
+					if (e.from.classList.contains("pvtCols")) {
+						// Moving within pvtCols - simulate the move
+						proposedCols.splice(e.oldIndex, 1);
+						// Adjust newIndex if moving forward
+						let adjustedNewIndex = e.newIndex;
+						if (e.oldIndex < e.newIndex) {
+							adjustedNewIndex = e.newIndex - 1;
+						}
+						proposedCols.splice(adjustedNewIndex, 0, item);
+					} else {
+						// Adding from outside
+						proposedCols.splice(e.newIndex, 0, item);
+					}
+					
+					const newIndex = e.from.classList.contains("pvtCols") ? (e.oldIndex < e.newIndex ? e.newIndex - 1 : e.newIndex) : e.newIndex;
+						const validation = this.validateColumnDrop(item, originalCols, newIndex);
+						
+						if (!validation.allowed) {
+							// Validation failed - FORCE REVERT IMMEDIATELY
+							// The key issue: vuedraggable may have already mutated the arrays
+							// We need to restore BOTH this.propsData.cols AND this.cols (the prop)
+							
+							// CRITICAL: Replace entire array references to ensure reactivity
+							// For propsData, we can directly replace (it's in data())
+							this.propsData.cols = [...originalPropsCols];
+							
+							// For the prop (this.cols), we must use splice to replace all items
+							// This is necessary because this.cols is a prop from parent's shallowRef
+							// Using splice ensures the parent's shallowRef detects the change
+							if (this.cols.length !== originalCols.length || 
+								JSON.stringify(this.cols) !== JSON.stringify(originalCols)) {
+								// Clear and replace all items
+								this.cols.splice(0, this.cols.length);
+								originalCols.forEach(col => this.cols.push(col));
+							}
+							
+							// Use nextTick as safety net - vuedraggable might update asynchronously
+							nextTick(() => {
+								// Check if vuedraggable changed the state
+								if (JSON.stringify(this.cols) !== JSON.stringify(originalCols) ||
+									JSON.stringify(this.propsData.cols) !== JSON.stringify(originalPropsCols)) {
+									// Force replace again
+									this.propsData.cols = [...originalPropsCols];
+									this.cols.splice(0, this.cols.length);
+									originalCols.forEach(col => this.cols.push(col));
+								}
+								
+								// Double-check after another tick (vuedraggable might update late)
+								nextTick(() => {
+									if (JSON.stringify(this.cols) !== JSON.stringify(originalCols) ||
+										JSON.stringify(this.propsData.cols) !== JSON.stringify(originalPropsCols)) {
+										// Final force replace
+										this.propsData.cols = [...originalPropsCols];
+										this.cols.splice(0, this.cols.length);
+										originalCols.forEach(col => this.cols.push(col));
+										this.clearWorkerCache();
+									}
+								});
+							});
+							
+							this.clearWorkerCache();
+							return; // CRITICAL: Exit early - do not proceed with any changes
+						}
+				}
+				
+				// Validation passed (or no validation needed) - proceed with changes
+				// But first, double-check that the item wasn't incorrectly added
+				if (e.to.classList.contains("pvtCols") && !e.from.classList.contains("pvtCols")) {
+					// Item is being added from outside - verify it's not already there incorrectly
+					const itemIndex = this.cols.indexOf(item);
+					const wasInOriginal = originalCols.indexOf(item) !== -1;
+					if (itemIndex !== -1 && !wasInOriginal) {
+						// Item was incorrectly added - restore original state by replacing array reference
+						this.propsData.cols = [...originalPropsCols];
+						this.cols.splice(0, this.cols.length, ...originalCols);
+						this.clearWorkerCache();
+						return; // Don't proceed
+					}
+				}
+				
+				// Proceed with changes only if validation passed
 				if (e.from.classList.contains("pvtCols")) {
 					this.propsData.cols.splice(e.oldIndex, 1);
+					// Also update the prop directly to trigger parent reactivity
+					this.cols.splice(e.oldIndex, 1);
 					this.clearWorkerCache();
 				}
 				if (e.to.classList.contains("pvtCols")) {
-					this.propsData.cols.splice(e.newIndex, 0, item);
-					this.clearWorkerCache();
+					// Only add if item is not already there
+					if (this.cols.indexOf(item) === -1 || e.from.classList.contains("pvtCols")) {
+						this.propsData.cols.splice(e.newIndex, 0, item);
+						// Also update the prop directly to trigger parent reactivity
+						this.cols.splice(e.newIndex, 0, item);
+						this.clearWorkerCache();
+					}
 				}
 			},
 			"pvtAxisContainer pvtHorizList pvtCols",
@@ -1486,10 +1665,14 @@ export default {
 				
 				if (e.from.classList.contains("pvtRows")) {
 					this.propsData.rows.splice(e.oldIndex, 1);
+					// Also update the prop directly to trigger parent reactivity
+					this.rows.splice(e.oldIndex, 1);
 					this.clearWorkerCache();
 				}
 				if (e.to.classList.contains("pvtRows")) {
 					this.propsData.rows.splice(e.newIndex, 0, item);
+					// Also update the prop directly to trigger parent reactivity
+					this.rows.splice(e.newIndex, 0, item);
 					this.clearWorkerCache();
 				}
 			},
