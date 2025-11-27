@@ -1535,6 +1535,10 @@ export default {
 				// Store original state before making any changes
 				const originalCols = [...this.cols];
 				const originalPropsCols = [...this.propsData.cols];
+				const originalRows = [...this.rows];
+				const originalPropsRows = [...this.propsData.rows];
+				const cameFromRows = e.from.classList.contains("pvtRows");
+				const originalRowIndex = cameFromRows ? this.rows.indexOf(item) : -1;
 				
 				// If dropping to pvtCols, validate FIRST before any changes
 				if (e.to.classList.contains("pvtCols") && this.validateColumnDrop) {
@@ -1576,6 +1580,23 @@ export default {
 								originalCols.forEach(col => this.cols.push(col));
 							}
 							
+							// CRITICAL: If the field came from rows (vertical header), restore it to rows
+							if (cameFromRows && originalRowIndex !== -1) {
+								// Check if item was removed from rows
+								const currentRowIndex = this.rows.indexOf(item);
+								if (currentRowIndex === -1) {
+									// Item was removed from rows - restore it to original position
+									this.propsData.rows.splice(originalRowIndex, 0, item);
+									this.rows.splice(originalRowIndex, 0, item);
+								} else if (currentRowIndex !== originalRowIndex) {
+									// Item is in rows but at wrong position - restore to original position
+									this.propsData.rows.splice(currentRowIndex, 1);
+									this.rows.splice(currentRowIndex, 1);
+									this.propsData.rows.splice(originalRowIndex, 0, item);
+									this.rows.splice(originalRowIndex, 0, item);
+								}
+							}
+							
 							// Use nextTick as safety net - vuedraggable might update asynchronously
 							nextTick(() => {
 								// Check if vuedraggable changed the state
@@ -1587,6 +1608,22 @@ export default {
 									originalCols.forEach(col => this.cols.push(col));
 								}
 								
+								// Restore rows if needed
+								if (cameFromRows && originalRowIndex !== -1) {
+									const currentRowIndex = this.rows.indexOf(item);
+									if (currentRowIndex === -1) {
+										// Item was removed from rows - restore it to original position
+										this.propsData.rows.splice(originalRowIndex, 0, item);
+										this.rows.splice(originalRowIndex, 0, item);
+									} else if (currentRowIndex !== originalRowIndex) {
+										// Item is in rows but at wrong position - restore to original position
+										this.propsData.rows.splice(currentRowIndex, 1);
+										this.rows.splice(currentRowIndex, 1);
+										this.propsData.rows.splice(originalRowIndex, 0, item);
+										this.rows.splice(originalRowIndex, 0, item);
+									}
+								}
+								
 								// Double-check after another tick (vuedraggable might update late)
 								nextTick(() => {
 									if (JSON.stringify(this.cols) !== JSON.stringify(originalCols) ||
@@ -1596,6 +1633,22 @@ export default {
 										this.cols.splice(0, this.cols.length);
 										originalCols.forEach(col => this.cols.push(col));
 										this.clearWorkerCache();
+									}
+									
+									// Final restore of rows if needed
+									if (cameFromRows && originalRowIndex !== -1) {
+										const currentRowIndex = this.rows.indexOf(item);
+										if (currentRowIndex === -1) {
+											// Item was removed from rows - restore it to original position
+											this.propsData.rows.splice(originalRowIndex, 0, item);
+											this.rows.splice(originalRowIndex, 0, item);
+										} else if (currentRowIndex !== originalRowIndex) {
+											// Item is in rows but at wrong position - restore to original position
+											this.propsData.rows.splice(currentRowIndex, 1);
+											this.rows.splice(currentRowIndex, 1);
+											this.propsData.rows.splice(originalRowIndex, 0, item);
+											this.rows.splice(originalRowIndex, 0, item);
+										}
 									}
 								});
 							});

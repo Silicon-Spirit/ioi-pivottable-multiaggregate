@@ -682,128 +682,231 @@ function makeRenderer(opts = {}) {
 					let valueCellColors = () => ({});
 					let rowTotalColors = () => ({});
 					let colTotalColors = () => ({});
+					let grandTotalColors = () => ({});
 
 					// Apply heatmap colors if in heatmap mode (works with single or multiple aggregators)
-					// For multiple aggregators, use the first aggregator for heatmap coloring
+					// For multiple aggregators, create color scales for EACH aggregator separately
 					if (currentMode && ['heat-map-full', 'heat-map-col', 'heat-map-row'].includes(currentMode)) {
 					const colorScaleGenerator = this.tableColorScaleGenerator;
-						const primaryAggregator = aggregatorList[0]; // Use first aggregator for heatmap
 						
-						if (usePreCalculated && this.pivotResult) {
-							// Use pre-calculated data from worker for heatmap
-							const rowTotalValues = colKeys.map((colKey) => {
-								const flatColKey = colKey.join(String.fromCharCode(0));
-								return this.pivotResult.colTotals[flatColKey]?.[primaryAggregator]?.value ?? null;
-							});
-					rowTotalColors = colorScaleGenerator(rowTotalValues);
-							
-							const colTotalValues = rowKeys.map((rowKey) => {
-								const flatRowKey = rowKey.join(String.fromCharCode(0));
-								return this.pivotResult.rowTotals[flatRowKey]?.[primaryAggregator]?.value ?? null;
-							});
-					colTotalColors = colorScaleGenerator(colTotalValues);
+						// Create color scales for each aggregator
+						const aggregatorColorScales = {};
+						const aggregatorRowTotalColors = {};
+						const aggregatorColTotalColors = {};
+						const aggregatorGrandTotalColors = {};
+						
+						aggregatorList.forEach((aggName) => {
+							if (usePreCalculated && this.pivotResult) {
+								// Use pre-calculated data from worker for heatmap
+								const rowTotalValues = colKeys.map((colKey) => {
+									const flatColKey = colKey.join(String.fromCharCode(0));
+									return this.pivotResult.colTotals[flatColKey]?.[aggName]?.value ?? null;
+								}).filter(v => v !== null && v !== undefined);
+								if (rowTotalValues.length > 0) {
+									aggregatorRowTotalColors[aggName] = colorScaleGenerator(rowTotalValues);
+								} else {
+									aggregatorRowTotalColors[aggName] = () => ({});
+								}
+								
+								const colTotalValues = rowKeys.map((rowKey) => {
+									const flatRowKey = rowKey.join(String.fromCharCode(0));
+									return this.pivotResult.rowTotals[flatRowKey]?.[aggName]?.value ?? null;
+								}).filter(v => v !== null && v !== undefined);
+								if (colTotalValues.length > 0) {
+									aggregatorColTotalColors[aggName] = colorScaleGenerator(colTotalValues);
+								} else {
+									aggregatorColTotalColors[aggName] = () => ({});
+								}
+								
+								// Grand totals for this aggregator
+								const grandTotalValue = this.pivotResult.allTotal?.[aggName]?.value ?? null;
+								if (grandTotalValue !== null && grandTotalValue !== undefined) {
+									aggregatorGrandTotalColors[aggName] = colorScaleGenerator([grandTotalValue]);
+								} else {
+									aggregatorGrandTotalColors[aggName] = () => ({});
+								}
 
-							if (currentMode === "heat-map-full") {
-						const allValues = [];
-								rowKeys.forEach((rowKey) =>
+								if (currentMode === "heat-map-full") {
+									const allValues = [];
+									rowKeys.forEach((rowKey) =>
+										colKeys.forEach((colKey) => {
+											const flatRowKey = rowKey.join(String.fromCharCode(0));
+											const flatColKey = colKey.join(String.fromCharCode(0));
+											const val = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
+											if (val !== null && val !== undefined) {
+												allValues.push(val);
+											}
+										})
+									);
+									if (allValues.length > 0) {
+										aggregatorColorScales[aggName] = colorScaleGenerator(allValues);
+									} else {
+										aggregatorColorScales[aggName] = () => ({});
+									}
+								} else if (currentMode === "heat-map-row") {
+									const rowColorScales = {};
+									rowKeys.forEach((rowKey) => {
+										const flatRowKey = rowKey.join(String.fromCharCode(0));
+										const rowValues = colKeys.map((colKey) => {
+											const flatColKey = colKey.join(String.fromCharCode(0));
+											return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
+										}).filter(v => v !== null && v !== undefined);
+										if (rowValues.length > 0) {
+											rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
+										} else {
+											rowColorScales[flatRowKey] = () => ({});
+										}
+									});
+									aggregatorColorScales[aggName] = (rowKey, colKey, value) => {
+										const flatRowKey = rowKey.join(String.fromCharCode(0));
+										const scale = rowColorScales[flatRowKey];
+										return scale && typeof scale === 'function' ? scale(value) : {};
+									};
+								} else if (currentMode === "heat-map-col") {
+									const colColorScales = {};
 									colKeys.forEach((colKey) => {
-										const flatRowKey = rowKey.join(String.fromCharCode(0));
 										const flatColKey = colKey.join(String.fromCharCode(0));
-										const val = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
-										allValues.push(val);
-									})
-						);
-						const colorScale = colorScaleGenerator(allValues);
-								valueCellColors = (rowKey, colKey, value) => colorScale(value);
-							} else if (currentMode === "heat-map-row") {
-						const rowColorScales = {};
-								rowKeys.forEach((rowKey) => {
-									const flatRowKey = rowKey.join(String.fromCharCode(0));
-									const rowValues = colKeys.map((colKey) => {
+										const colValues = rowKeys.map((rowKey) => {
+											const flatRowKey = rowKey.join(String.fromCharCode(0));
+											return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
+										}).filter(v => v !== null && v !== undefined);
+										if (colValues.length > 0) {
+											colColorScales[flatColKey] = colorScaleGenerator(colValues);
+										} else {
+											colColorScales[flatColKey] = () => ({});
+										}
+									});
+									aggregatorColorScales[aggName] = (rowKey, colKey, value) => {
 										const flatColKey = colKey.join(String.fromCharCode(0));
-										return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
-									});
-									rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
-						});
-								valueCellColors = (rowKey, colKey, value) => {
-									const flatRowKey = rowKey.join(String.fromCharCode(0));
-									const scale = rowColorScales[flatRowKey];
-									return scale ? scale(value) : {};
-								};
-							} else if (currentMode === "heat-map-col") {
-						const colColorScales = {};
-								colKeys.forEach((colKey) => {
-									const flatColKey = colKey.join(String.fromCharCode(0));
-									const colValues = rowKeys.map((rowKey) => {
-										const flatRowKey = rowKey.join(String.fromCharCode(0));
-										return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator]?.value ?? null;
-									});
-									colColorScales[flatColKey] = colorScaleGenerator(colValues);
-								});
-								valueCellColors = (rowKey, colKey, value) => {
-									const flatColKey = colKey.join(String.fromCharCode(0));
-									const scale = colColorScales[flatColKey];
-									return scale ? scale(value) : {};
-								};
-							}
-						} else if (pivotData) {
-							// Fallback to PivotData instance
-							const rowTotalValues = colKeys.map((colKey) => {
-								const agg = pivotData.getAggregator([], colKey, primaryAggregator);
-								return agg && typeof agg.value === 'function' ? agg.value() : null;
-							});
-							rowTotalColors = colorScaleGenerator(rowTotalValues);
-							
-							const colTotalValues = rowKeys.map((rowKey) => {
-								const agg = pivotData.getAggregator(rowKey, [], primaryAggregator);
-								return agg && typeof agg.value === 'function' ? agg.value() : null;
-							});
-							colTotalColors = colorScaleGenerator(colTotalValues);
+										const scale = colColorScales[flatColKey];
+										return scale && typeof scale === 'function' ? scale(value) : {};
+									};
+								}
+							} else if (pivotData) {
+								// Fallback to PivotData instance
+								const rowTotalValues = colKeys.map((colKey) => {
+									const agg = pivotData.getAggregator([], colKey, aggName);
+									return agg && typeof agg.value === 'function' ? agg.value() : null;
+								}).filter(v => v !== null && v !== undefined);
+								if (rowTotalValues.length > 0) {
+									aggregatorRowTotalColors[aggName] = colorScaleGenerator(rowTotalValues);
+								} else {
+									aggregatorRowTotalColors[aggName] = () => ({});
+								}
+								
+								const colTotalValues = rowKeys.map((rowKey) => {
+									const agg = pivotData.getAggregator(rowKey, [], aggName);
+									return agg && typeof agg.value === 'function' ? agg.value() : null;
+								}).filter(v => v !== null && v !== undefined);
+								if (colTotalValues.length > 0) {
+									aggregatorColTotalColors[aggName] = colorScaleGenerator(colTotalValues);
+								} else {
+									aggregatorColTotalColors[aggName] = () => ({});
+								}
+								
+								// Grand totals for this aggregator
+								const grandTotalAggregator = pivotData.getAggregator([], [], aggName);
+								if (grandTotalAggregator && typeof grandTotalAggregator.value === 'function') {
+									const grandTotalValue = grandTotalAggregator.value();
+									if (grandTotalValue !== null && grandTotalValue !== undefined) {
+										aggregatorGrandTotalColors[aggName] = colorScaleGenerator([grandTotalValue]);
+									} else {
+										aggregatorGrandTotalColors[aggName] = () => ({});
+									}
+								} else {
+									aggregatorGrandTotalColors[aggName] = () => ({});
+								}
 
-							if (currentMode === "heat-map-full") {
-								const allValues = [];
-								rowKeys.forEach((rowKey) =>
+								if (currentMode === "heat-map-full") {
+									const allValues = [];
+									rowKeys.forEach((rowKey) =>
+										colKeys.forEach((colKey) => {
+											const agg = pivotData.getAggregator(rowKey, colKey, aggName);
+											const val = agg && typeof agg.value === 'function' ? agg.value() : null;
+											if (val !== null && val !== undefined) {
+												allValues.push(val);
+											}
+										})
+									);
+									if (allValues.length > 0) {
+										aggregatorColorScales[aggName] = colorScaleGenerator(allValues);
+									} else {
+										aggregatorColorScales[aggName] = () => ({});
+									}
+								} else if (currentMode === "heat-map-row") {
+									const rowColorScales = {};
+									rowKeys.forEach((rowKey) => {
+										const flatRowKey = rowKey.join(String.fromCharCode(0));
+										const rowValues = colKeys.map((colKey) => {
+											const agg = pivotData.getAggregator(rowKey, colKey, aggName);
+											return agg && typeof agg.value === 'function' ? agg.value() : null;
+										}).filter(v => v !== null && v !== undefined);
+										if (rowValues.length > 0) {
+											rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
+										} else {
+											rowColorScales[flatRowKey] = () => ({});
+										}
+									});
+									aggregatorColorScales[aggName] = (rowKey, colKey, value) => {
+										const flatRowKey = rowKey.join(String.fromCharCode(0));
+										const scale = rowColorScales[flatRowKey];
+										return scale && typeof scale === 'function' ? scale(value) : {};
+									};
+								} else if (currentMode === "heat-map-col") {
+									const colColorScales = {};
 									colKeys.forEach((colKey) => {
-										const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
-										const val = agg && typeof agg.value === 'function' ? agg.value() : null;
-										allValues.push(val);
-									})
-								);
-								const colorScale = colorScaleGenerator(allValues);
-								valueCellColors = (rowKey, colKey, value) => colorScale(value);
-							} else if (currentMode === "heat-map-row") {
-								const rowColorScales = {};
-								rowKeys.forEach((rowKey) => {
-									const flatRowKey = rowKey.join(String.fromCharCode(0));
-									const rowValues = colKeys.map((colKey) => {
-										const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
-										return agg && typeof agg.value === 'function' ? agg.value() : null;
+										const flatColKey = colKey.join(String.fromCharCode(0));
+										const colValues = rowKeys.map((rowKey) => {
+											const agg = pivotData.getAggregator(rowKey, colKey, aggName);
+											return agg && typeof agg.value === 'function' ? agg.value() : null;
+										}).filter(v => v !== null && v !== undefined);
+										if (colValues.length > 0) {
+											colColorScales[flatColKey] = colorScaleGenerator(colValues);
+										} else {
+											colColorScales[flatColKey] = () => ({});
+										}
 									});
-									rowColorScales[flatRowKey] = colorScaleGenerator(rowValues);
-								});
-								valueCellColors = (rowKey, colKey, value) => {
-									const flatRowKey = rowKey.join(String.fromCharCode(0));
-									const scale = rowColorScales[flatRowKey];
-									return scale ? scale(value) : {};
-								};
-							} else if (currentMode === "heat-map-col") {
-								const colColorScales = {};
-								colKeys.forEach((colKey) => {
-									const flatColKey = colKey.join(String.fromCharCode(0));
-									const colValues = rowKeys.map((rowKey) => {
-										const agg = pivotData.getAggregator(rowKey, colKey, primaryAggregator);
-										return agg && typeof agg.value === 'function' ? agg.value() : null;
-									});
-									colColorScales[flatColKey] = colorScaleGenerator(colValues);
-						});
-								valueCellColors = (rowKey, colKey, value) => {
-									const flatColKey = colKey.join(String.fromCharCode(0));
-									const scale = colColorScales[flatColKey];
-									return scale ? scale(value) : {};
-								};
+									aggregatorColorScales[aggName] = (rowKey, colKey, value) => {
+										const flatColKey = colKey.join(String.fromCharCode(0));
+										const scale = colColorScales[flatColKey];
+										return scale && typeof scale === 'function' ? scale(value) : {};
+									};
+								}
 							}
+						});
+						
+						// Create functions that use the correct aggregator's color scale
+						valueCellColors = (rowKey, colKey, value, aggregatorName) => {
+							const aggName = aggregatorName || aggregatorList[0];
+							const scale = aggregatorColorScales[aggName];
+							if (scale && typeof scale === 'function') {
+								if (currentMode === "heat-map-full") {
+									return scale(value);
+								} else {
+									return scale(rowKey, colKey, value);
+								}
+							}
+							return {};
+						};
+						
+						rowTotalColors = (value, aggregatorName) => {
+							const aggName = aggregatorName || aggregatorList[0];
+							const scale = aggregatorRowTotalColors[aggName];
+							return scale && typeof scale === 'function' ? scale(value) : {};
+						};
+						
+						colTotalColors = (value, aggregatorName) => {
+							const aggName = aggregatorName || aggregatorList[0];
+							const scale = aggregatorColTotalColors[aggName];
+							return scale && typeof scale === 'function' ? scale(value) : {};
+						};
+						
+						grandTotalColors = (value, aggregatorName) => {
+							const aggName = aggregatorName || aggregatorList[0];
+							const scale = aggregatorGrandTotalColors[aggName];
+							return scale && typeof scale === 'function' ? scale(value) : {};
+						};
 					}
-				}
 
 				const getClickHandler =
 					this.tableOptions && this.tableOptions.clickCallback
@@ -1088,7 +1191,7 @@ function makeRenderer(opts = {}) {
 												Object.assign(
 													{
 												class: cellClasses,
-												style: valueCellColors(rowKey, colKey, value),
+												style: valueCellColors(rowKey, colKey, value, aggregatorName),
 												key: `pvtVal${rowIndex}-${descriptorIndex}`,
 													},
 													getClickHandler
@@ -1265,7 +1368,7 @@ function makeRenderer(opts = {}) {
 												Object.assign(
 													{
 													class: totalClasses,
-													style: colTotalColors(totalValue),
+													style: colTotalColors(totalValue, aggName),
 													key: `rowTotal${rowIndex}-${aggIndex}`,
 													},
 													getClickHandler
@@ -1424,6 +1527,7 @@ function makeRenderer(opts = {}) {
 											Object.assign(
 												{
 											class: grandClasses,
+											style: grandTotalColors(grandValue, aggName),
 											key: "grandTotalRightmost",
 												},
 												getClickHandler
@@ -1536,7 +1640,7 @@ function makeRenderer(opts = {}) {
 										Object.assign(
 											{
 												class: columnClasses,
-												style: rowTotalColors(totalValue),
+												style: rowTotalColors(totalValue, aggregatorName),
 												key: `colTotal${descriptorIndex}`,
 											},
 											getClickHandler
@@ -1665,6 +1769,7 @@ function makeRenderer(opts = {}) {
 											Object.assign(
 												{
 													class: grandClasses,
+													style: grandTotalColors(grandValue, aggName),
 													key: `grandTotal${aggIndex}`,
 												},
 												getClickHandler
@@ -1718,7 +1823,7 @@ function makeRenderer(opts = {}) {
 				}
 				
 				// Handle chart renderers
-				else if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(currentMode)) {
+				if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(currentMode)) {
 					const chartData = this.getChartData();
 					
 					// Map chart mode to Recharts type
@@ -2060,12 +2165,14 @@ const XLSXExportRenderer = {
 			
 			// When colAttrs.length === 0, structure is simpler
 			if (colAttrs.length === 0) {
-				// Add "Totals" label
-				rowAttrs.forEach(() => {
+				// Add "Totals" label in the first column
+				totalRow.push(__("Totals"));
+				
+				// Add empty cells for row attribute columns
+				// Structure: "Totals" (position 0) + (rowAttrs.length - 1) empty cells + aggregator values
+				// This ensures the first aggregator value is at position rowAttrs.length
+				for (let i = 0; i < rowAttrs.length - 1; i++) {
 					totalRow.push('');
-				});
-				if (rowAttrs.length > 0) {
-					totalRow.push(__("Totals"));
 				}
 
 				// Add aggregator totals (grand totals) for each aggregator
