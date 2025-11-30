@@ -9,6 +9,8 @@
 	border-collapse: collapse;
 	background: #fff;
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+	position: relative;
+	z-index: 1;
 }
 
 .pvtUi select {
@@ -27,8 +29,57 @@
 .pvtUi td.pvtOutput {
 	padding: 0;
 	vertical-align: top;
-	border: 1px solid #e0e0e0;
+	border: none;
 	overflow-x: auto;
+	margin: 0;
+}
+
+/* Remove margin from table inside pvtOutput td */
+.pvtUi td.pvtOutput table.pvtTable,
+.pvtUi td.pvtOutput .pvtTable {
+	margin: 0 !important;
+}
+
+/* Control Panel Toggle Button */
+.pvtControlPanelToggle {
+	position: absolute !important;
+	top: 4px !important;
+	left: 4px !important;
+	z-index: 10000 !important;
+	background: #1976d2 !important;
+	border: 1px solid #1565c0 !important;
+	border-radius: 4px !important;
+	padding: 4px 8px !important;
+	cursor: pointer !important;
+	font-size: 11px !important;
+	color: white !important;
+	display: flex !important;
+	align-items: center !important;
+	gap: 4px !important;
+	transition: all 0.2s !important;
+	box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+	visibility: visible !important;
+	opacity: 1 !important;
+	pointer-events: auto !important;
+}
+
+.pvtControlPanelToggle:hover {
+	background: #1565c0 !important;
+	border-color: #0d47a1 !important;
+	box-shadow: 0 4px 8px rgba(0,0,0,0.15) !important;
+}
+
+.pvtControlPanelToggle:active {
+	background: #0d47a1 !important;
+	transform: scale(0.98);
+}
+
+/* Responsive design for toggle */
+@media screen and (max-width: 768px) {
+	.pvtControlPanelToggle {
+		font-size: 10px !important;
+		padding: 3px 6px !important;
+	}
 }
 
 /* Filter bar styling - light blue background */
@@ -113,8 +164,10 @@
 table.pvtTable {
 	font-size: 8pt;
 	text-align: left;
-	border-collapse: collapse;
+	border-collapse: separate;
+	border-spacing: 0;
 	border: 1px solid #c8d4e3;
+	margin: 0;
 }
 
 table.pvtTable thead tr th,
@@ -123,14 +176,22 @@ table.pvtTable tbody tr th {
 	border: 1px solid #c8d4e3;
 	font-size: 8pt;
 	padding: 5px;
+	vertical-align: middle;
 }
 
 table.pvtTable .pvtColLabel {
-	text-align: center;
+	text-align: center !important;
+	vertical-align: middle !important;
 }
 
 table.pvtTable .pvtTotalLabel {
-	text-align: right;
+	text-align: center !important;
+	vertical-align: middle !important;
+}
+
+table.pvtTable .pvtTotalGroupLabel {
+	text-align: center !important;
+	vertical-align: middle !important;
 }
 
 table.pvtTable tbody tr td {
@@ -331,7 +392,7 @@ table.pvtTable tbody tr td {
 	}
 
 	.pvtTable {
-		margin: auto;
+		margin: 0 !important;
 	}
 }
 

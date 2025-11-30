@@ -233,6 +233,7 @@ export default {
 			zIndices: {},
 			maxZIndex: 1000,
 			openDropdown: false,
+			showControlPanel: true,
 			materializedInput: shallowRef([]),
 			// Performance optimization: use shallowRef for large pivot results
 			pivotResult: shallowRef(null),
@@ -1799,6 +1800,36 @@ export default {
 				},
 			},
 			[
+				h("button", {
+					class: ["pvtControlPanelToggle"],
+					onClick: () => {
+						this.showControlPanel = !this.showControlPanel;
+					},
+					title: this.showControlPanel ? __('Hide control panel') : __('Show control panel'),
+					style: {
+						position: "absolute",
+						top: "4px",
+						left: "4px",
+						zIndex: 10000,
+						background: "#1976d2",
+						border: "1px solid #1565c0",
+						borderRadius: "4px",
+						padding: "4px 8px",
+						cursor: "pointer",
+						fontSize: "11px",
+						color: "white",
+						display: "flex",
+						alignItems: "center",
+						gap: "4px",
+						transition: "all 0.2s",
+						boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+						visibility: "visible",
+						opacity: 1,
+					},
+				}, [
+					this.showControlPanel ? "▼" : "▶",
+					this.showControlPanel ? __("Hide Controls") : __("Show Controls")
+				]),
 				h(
 					"table",
 					{
@@ -1806,9 +1837,11 @@ export default {
 					},
 					[
 						h("tbody", [
-							h("tr", [rendererCell, unusedAttrsCell]),
-							h("tr", [aggregatorCell, colAttrsCell]),
-							h("tr", [rowAttrsCell, outputCell]),
+							this.showControlPanel ? h("tr", [rendererCell, unusedAttrsCell]) : null,
+							this.showControlPanel ? h("tr", [aggregatorCell, colAttrsCell]) : null,
+							this.showControlPanel 
+								? h("tr", [rowAttrsCell, outputCell])
+								: h("tr", [h("td", { style: { display: "none" } }), outputCell]),
 						]),
 					]
 				),
