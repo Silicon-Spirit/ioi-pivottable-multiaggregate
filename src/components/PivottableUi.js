@@ -234,7 +234,7 @@ export default {
 			maxZIndex: 1000,
 			openDropdown: false,
 			showControlPanel: true,
-			materializedInput: shallowRef([]),
+		materializedInput: shallowRef([]),
 			// Performance optimization: use shallowRef for large pivot results
 			pivotResult: shallowRef(null),
 			isCalculating: false,
@@ -358,6 +358,9 @@ export default {
 		},
 	},
 	methods: {
+		toggleControlPanel() {
+			this.showControlPanel = !this.showControlPanel;
+		},
 		assignValue(field) {
 			if (this.valueFilter) {
 				this.propsData.valueFilter = this.valueFilter
@@ -1481,12 +1484,16 @@ export default {
 						]
 					);
 		},
-		outputCell(props) {
+		outputCell(props, colspan = null) {
+			const attrs = {
+				class: ["pvtOutput"],
+			};
+			if (colspan !== null) {
+				attrs.colSpan = colspan;
+			}
 			return h(
 				"td",
-				{
-					class: ["pvtOutput"],
-				},
+				attrs,
 				[h(Pivottable, props)]
 			);
 		},
@@ -1789,7 +1796,9 @@ export default {
 
 		const rendererCell = this.rendererCell(rendererName);
 		const aggregatorCell = this.aggregatorCell(aggregatorName, vals);
-		const outputCell = this.outputCell(props);
+		const outputCell = this.showControlPanel 
+			? this.outputCell(props)
+			: this.outputCell(props, 2);
 
 		return h(
 			"div",
@@ -1797,39 +1806,13 @@ export default {
 				style: {
 					position: "relative",
 					width: "100%",
+					minWidth: "100%",
+					maxWidth: "100%",
+					overflow: "hidden",
+					boxSizing: "border-box",
 				},
 			},
 			[
-				h("button", {
-					class: ["pvtControlPanelToggle"],
-					onClick: () => {
-						this.showControlPanel = !this.showControlPanel;
-					},
-					title: this.showControlPanel ? __('Hide control panel') : __('Show control panel'),
-					style: {
-						position: "absolute",
-						top: "4px",
-						left: "4px",
-						zIndex: 10000,
-						background: "#1976d2",
-						border: "1px solid #1565c0",
-						borderRadius: "4px",
-						padding: "4px 8px",
-						cursor: "pointer",
-						fontSize: "11px",
-						color: "white",
-						display: "flex",
-						alignItems: "center",
-						gap: "4px",
-						transition: "all 0.2s",
-						boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-						visibility: "visible",
-						opacity: 1,
-					},
-				}, [
-					this.showControlPanel ? "▼" : "▶",
-					this.showControlPanel ? __("Hide Controls") : __("Show Controls")
-				]),
 				h(
 					"table",
 					{
@@ -1837,11 +1820,14 @@ export default {
 					},
 					[
 						h("tbody", [
-							this.showControlPanel ? h("tr", [rendererCell, unusedAttrsCell]) : null,
+							// First tr: Always visible (renderer and unused attributes)
+							h("tr", [rendererCell, unusedAttrsCell]),
+							// Second tr: Hidden when control panel is hidden (aggregator and column attributes)
 							this.showControlPanel ? h("tr", [aggregatorCell, colAttrsCell]) : null,
+							// Third tr: Hidden when control panel is hidden (row attributes and output)
 							this.showControlPanel 
 								? h("tr", [rowAttrsCell, outputCell])
-								: h("tr", [h("td", { style: { display: "none" } }), outputCell]),
+								: h("tr", [outputCell]),
 						]),
 					]
 				),

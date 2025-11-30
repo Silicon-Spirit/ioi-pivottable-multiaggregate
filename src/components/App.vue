@@ -48,8 +48,19 @@
 				</div>
 			</div>
 		</div>
+		<div v-if="currentData && currentData.length > 0" class="control-panel-toggle-container">
+			<button 
+				@click="toggleControlPanel" 
+				class="control-panel-toggle-button"
+				:aria-label="showControlPanel ? 'Hide control panel' : 'Show control panel'"
+			>
+				{{ showControlPanel ? '▼' : '▶' }}
+				{{ showControlPanel ? 'Hide Controls' : 'Show Controls' }}
+			</button>
+		</div>
 		<PivottableUi
 			v-if="currentData && currentData.length > 0"
+			ref="pivottableRef"
 			:data="currentData"
 			:rows="rows"
 			:cols="cols"
@@ -88,6 +99,8 @@ export default {
 		const uploading = ref(false);
 		const horizontalHeaderCount = ref(0);
 		const showFieldStats = ref(true);
+		const showControlPanel = ref(true);
+		const pivottableRef = ref(null);
 
 		// Trigger file input click
 		const triggerFileInput = () => {
@@ -874,6 +887,19 @@ export default {
 				theadObserver = null;
 			}
 		});
+
+		const toggleControlPanel = () => {
+			// Only toggle if the table component exists and has data
+			if (pivottableRef.value && currentData.value && currentData.value.length > 0) {
+				pivottableRef.value.toggleControlPanel();
+				// Sync the state after toggling
+				nextTick(() => {
+					if (pivottableRef.value) {
+						showControlPanel.value = pivottableRef.value.showControlPanel;
+					}
+				});
+			}
+		};
 		
 		return {
 			currentData,
@@ -885,6 +911,9 @@ export default {
 			uploading,
 			horizontalHeaderCount,
 			showFieldStats,
+			showControlPanel,
+			pivottableRef,
+			toggleControlPanel,
 			triggerFileInput,
 			triggerJsonInput,
 			handleFileUpload,
@@ -899,6 +928,12 @@ export default {
 <style scoped>
 .app-container {
 	padding: 24px;
+	width: 100%;
+	min-width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+	overflow-x: hidden;
+	position: relative;
 }
 
 .controls {
@@ -1020,6 +1055,10 @@ export default {
 	border-radius: 6px;
 	border: 1px solid #ddd;
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	width: 100%;
+	min-width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
 }
 
 .field-stats-header {
@@ -1064,6 +1103,45 @@ export default {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 	gap: 6px;
+}
+
+.control-panel-toggle-container {
+	display: flex;
+	justify-content: flex-start;
+	margin: 12px 0;
+	width: 100%;
+	min-width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
+.control-panel-toggle-button {
+	background: #1976d2;
+	color: white;
+	border: 1px solid #1565c0;
+	border-radius: 4px;
+	padding: 4px 8px;
+	cursor: pointer;
+	font-size: 11px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	transition: background 0.2s, box-shadow 0.2s;
+	box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+	width: auto;
+	min-width: auto;
+	max-width: none;
+	white-space: nowrap;
+}
+
+.control-panel-toggle-button:hover {
+	background: #1565c0;
+	box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.control-panel-toggle-button:active {
+	background: #0d47a1;
+	transform: scale(0.98);
 }
 
 .field-stat-item {
