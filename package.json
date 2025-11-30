@@ -47,6 +47,7 @@
 		"vue": "^3.0.0"
 	},
 	"dependencies": {
+		"@tanstack/vue-virtual": "^3.13.12",
 		"echarts": "^6.0.0",
 		"vue-echarts": "^8.0.1",
 		"vuedraggable": "^4.1.0",

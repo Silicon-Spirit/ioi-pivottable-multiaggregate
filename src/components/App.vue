@@ -27,15 +27,24 @@
 			<span v-if="uploading" class="upload-status">Processing file...</span>
 		</div>
 		<div v-if="fieldAnalysis && fieldAnalysis.fieldStats" class="field-stats-container">
-			<h3 class="field-stats-title">Field Statistics (Unique Value Counts)</h3>
-			<div class="field-stats-grid">
+			<div class="field-stats-header">
+				<h3 class="field-stats-title">Field Statistics (Unique Value Counts)</h3>
+				<button 
+					@click="showFieldStats = !showFieldStats" 
+					class="field-stats-toggle"
+					:aria-label="showFieldStats ? 'Hide Field Statistics' : 'Show Field Statistics'"
+				>
+					{{ showFieldStats ? '▼' : '▶' }}
+				</button>
+			</div>
+			<div v-if="showFieldStats" class="field-stats-grid">
 				<div 
 					v-for="(count, field) in fieldAnalysis.fieldStats" 
 					:key="field" 
 					class="field-stat-item"
 				>
 					<span class="field-name">{{ field }}</span>
-					<span class="field-count">{{ count.toLocaleString() }} unique values</span>
+					<span class="field-count">{{ count.toLocaleString() }}</span>
 				</div>
 			</div>
 		</div>
@@ -51,6 +60,9 @@
 			rendererName="Table"
 			:rowTotal="true"
 			:colTotal="true"
+			:enableVirtualization="true"
+			:virtualizationThreshold="100"
+			:virtualizationMaxHeight="600"
 		/>
 	</div>
 </template>
@@ -75,6 +87,7 @@ export default {
 		const aggregatorNames = shallowRef(['Count', 'Sum']);
 		const uploading = ref(false);
 		const horizontalHeaderCount = ref(0);
+		const showFieldStats = ref(true);
 
 		// Trigger file input click
 		const triggerFileInput = () => {
@@ -433,7 +446,7 @@ export default {
 			
 			const dataCellsCount = calculateDataCellsCount(proposedCols);
 			
-			if (dataCellsCount > 2000) {
+			if (dataCellsCount > 200) {
 				const aggregatorCount = aggregatorNames.value ? aggregatorNames.value.length : 1;
 				const columnCombinations = proposedCols.length > 0 ? dataCellsCount / aggregatorCount : 1;
 				const columnFieldsList = proposedCols.join(', ');
@@ -871,6 +884,7 @@ export default {
 			aggregatorNames,
 			uploading,
 			horizontalHeaderCount,
+			showFieldStats,
 			triggerFileInput,
 			triggerJsonInput,
 			handleFileUpload,
@@ -1000,56 +1014,91 @@ export default {
 }
 
 .field-stats-container {
-	margin-bottom: 24px;
-	padding: 20px;
+	margin-bottom: 16px;
+	padding: 12px;
 	background: white;
-	border-radius: 8px;
+	border-radius: 6px;
 	border: 1px solid #ddd;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.field-stats-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 10px;
 }
 
 .field-stats-title {
-	margin: 0 0 16px 0;
+	margin: 0;
 	color: #333;
-	font-size: 18px;
+	font-size: 14px;
 	font-weight: 600;
-	border-bottom: 2px solid #1976d2;
-	padding-bottom: 8px;
+	border-bottom: 1px solid #1976d2;
+	padding-bottom: 6px;
+	flex: 1;
+}
+
+.field-stats-toggle {
+	background: #1976d2;
+	color: white;
+	border: none;
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 12px;
+	cursor: pointer;
+	transition: background 0.2s;
+	margin-left: 8px;
+	min-width: 28px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.field-stats-toggle:hover {
+	background: #1565c0;
 }
 
 .field-stats-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-	gap: 12px;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 6px;
 }
 
 .field-stat-item {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 12px 16px;
+	padding: 6px 10px;
 	background: #f8f9fa;
-	border-radius: 6px;
-	border-left: 4px solid #1976d2;
-	transition: all 0.2s;
+	border-radius: 4px;
+	border-left: 3px solid #1976d2;
+	transition: all 0.15s;
 }
 
 .field-stat-item:hover {
 	background: #e3f2fd;
-	transform: translateX(2px);
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	transform: translateX(1px);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .field-name {
-	font-weight: 600;
+	font-weight: 500;
 	color: #333;
-	font-size: 14px;
+	font-size: 11px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+	margin-right: 8px;
 }
 
 .field-count {
 	color: #1976d2;
 	font-weight: 600;
-	font-size: 14px;
+	font-size: 11px;
+	white-space: nowrap;
 }
 </style>
 

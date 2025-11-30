@@ -3,6 +3,7 @@ import defaultProps from "../utils/defaultProps.js";
 import { h } from "vue";
 import * as XLSX from "xlsx";
 import ChartWrapper from "./RechartsWrapper.js";
+import VirtualizedTable from "./VirtualizedTable.vue";
 import { pivotWorkerManager } from "../utils/pivotWorkerManager.js";
 import { optimizeChartDataWithTopN } from "../utils/chartOptimization.js";
 
@@ -21,6 +22,18 @@ function makeRenderer(opts = {}) {
 		name: opts.name,
 		props: {
 			mode: String,
+			enableVirtualization: {
+				type: Boolean,
+				default: false,
+			},
+			virtualizationThreshold: {
+				type: Number,
+				default: 100, // Enable virtualization when rows > 100
+			},
+			virtualizationMaxHeight: {
+				type: Number,
+				default: 600, // Max container height in pixels
+			},
 			tableColorScaleGenerator: {
 				type: Function,
 				default: redColorScaleGenerator,
@@ -82,6 +95,18 @@ function makeRenderer(opts = {}) {
 					len++;
 				}
 				return len;
+			},
+			renderVirtualizedTable(headerRows, bodyRows, rowKeys, rowAttrs, headerColAttrs) {
+				// Create a unique key based on row/col attributes to force re-render when structure changes
+				// headerColAttrs is an array of strings, not arrays
+				const structureKey = `${rowAttrs.join(',')}-${headerColAttrs.join('|')}-${bodyRows.length}`;
+				return h(VirtualizedTable, {
+					key: structureKey,
+					headerRows: headerRows,
+					bodyRows: bodyRows,
+					rowHeight: 35,
+					maxHeight: this.virtualizationMaxHeight,
+				});
 			},
 			getChartData() {
 				// Check if we have a pre-calculated result with Top-N already applied
@@ -744,7 +769,7 @@ function makeRenderer(opts = {}) {
 										aggregatorColorScales[aggName] = () => ({});
 									}
 								} else if (currentMode === "heat-map-row") {
-									const rowColorScales = {};
+						const rowColorScales = {};
 									rowKeys.forEach((rowKey) => {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
 										const rowValues = colKeys.map((colKey) => {
@@ -763,7 +788,7 @@ function makeRenderer(opts = {}) {
 										return scale && typeof scale === 'function' ? scale(value) : {};
 									};
 								} else if (currentMode === "heat-map-col") {
-									const colColorScales = {};
+						const colColorScales = {};
 									colKeys.forEach((colKey) => {
 										const flatColKey = colKey.join(String.fromCharCode(0));
 										const colValues = rowKeys.map((rowKey) => {
@@ -906,7 +931,7 @@ function makeRenderer(opts = {}) {
 							const scale = aggregatorGrandTotalColors[aggName];
 							return scale && typeof scale === 'function' ? scale(value) : {};
 						};
-					}
+				}
 
 				const getClickHandler =
 					this.tableOptions && this.tableOptions.clickCallback
@@ -1813,6 +1838,22 @@ function makeRenderer(opts = {}) {
 						console.log(`==========================================\n`);
 					}
 
+					// Check if virtualization should be enabled
+					const shouldVirtualize = this.enableVirtualization && 
+						bodyRows.length > this.virtualizationThreshold &&
+						rowAttrs.length > 0; // Only virtualize if there are data rows
+
+					if (shouldVirtualize) {
+						return this.renderVirtualizedTable(
+							headerRows, 
+							bodyRows, 
+							rowKeys, 
+							rowAttrs, 
+							headerColAttrs
+						);
+					}
+
+					// Normal rendering for small tables
 					return h(
 						"table",
 						{

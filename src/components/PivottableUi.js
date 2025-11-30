@@ -100,6 +100,18 @@ export default {
 			type: Function,
 			default: null,
 		},
+		enableVirtualization: {
+			type: Boolean,
+			default: false,
+		},
+		virtualizationThreshold: {
+			type: Number,
+			default: 100,
+		},
+		virtualizationMaxHeight: {
+			type: Number,
+			default: 600,
+		},
 		menuLimit: {
 			type: Number,
 			default: 500,
@@ -1283,7 +1295,7 @@ export default {
 											h(Dropdown, {
 												style: {
 													display: "inline-block",
-													minWidth: "120px",
+													minWidth: "40px",
 												},
 												values: this.availableAggregators,
 												value: name,
@@ -1300,10 +1312,11 @@ export default {
 													style: {
 														display: numInputs > 1 ? "flex" : "inline-flex",
 														flexDirection: numInputs > 1 ? "column" : "row",
-														alignItems: numInputs > 1 ? "flex-start" : "center",
-														gap: "6px",
-														marginLeft: "12px",
-														paddingLeft: "12px",
+														alignItems: numInputs > 1 ? "center" : "center",
+														justifyContent: "center",
+														gap: "1px",
+														marginLeft: "1px",
+														paddingLeft: "1px",
 														borderLeft: "1px solid #e2e8f0",
 														width: numInputs > 1 ? "100%" : "auto",
 														maxWidth: numInputs > 1 ? "100%" : "none",
@@ -1314,19 +1327,19 @@ export default {
 													(numInputs > 1 ? numInputs : 1) > 1
 														? h("span", {
 																style: {
-																	fontSize: "12px",
+																	fontSize: "10px",
 																	color: "#64748b",
 																	fontWeight: "500",
-																	marginBottom: "4px",
+																	marginBottom: "2px",
 																	width: "100%",
 																},
 															}, "Values:")
 														: h("span", {
 																style: {
-																	fontSize: "12px",
+																	fontSize: "10px",
 																	color: "#64748b",
 																	fontWeight: "500",
-																	marginRight: "4px",
+																	marginRight: "1px",
 																},
 															}, "Value:"),
 													// Always show at least one dropdown, use numInputs if > 0, otherwise 1
@@ -1342,28 +1355,29 @@ export default {
 																display: "flex",
 																flexDirection: "row",
 																alignItems: "center",
+																justifyContent: "center",
 																width: numInputs > 1 ? "100%" : "auto",
-																marginBottom: numInputs > 1 && i < (numInputs > 0 ? numInputs : 1) - 1 ? "6px" : "0",
-																marginRight: numInputs > 1 ? "0" : (i < (numInputs > 0 ? numInputs : 1) - 1 ? "8px" : "0"),
+																marginBottom: numInputs > 1 && i < (numInputs > 0 ? numInputs : 1) - 1 ? "1px" : "0",
+																marginRight: numInputs > 1 ? "0" : (i < (numInputs > 0 ? numInputs : 1) - 1 ? "1px" : "0"),
 															}
 														}, [
 															fieldLabel ? h("span", {
 																style: {
-																	fontSize: "12px",
+																	fontSize: "10px",
 																	color: "#64748b",
 																	fontWeight: "500",
-																	marginRight: "6px",
-																	minWidth: numInputs > 1 ? "80px" : "auto",
+																	marginRight: "1px",
+																	minWidth: numInputs > 1 ? "40px" : "auto",
 																	flexShrink: 0,
 																}
 															}, fieldLabel) : null,
 															h(Dropdown, {
 																style: {
 																	display: "inline-block",
-																	minWidth: numInputs > 1 ? "120px" : "110px",
+																	minWidth: numInputs > 1 ? "40px" : "40px",
 																	width: numInputs > 1 ? "100%" : "auto",
 																	maxWidth: numInputs > 1 ? "100%" : "none",
-																	fontSize: "13px",
+																	fontSize: "11px",
 																	flex: numInputs > 1 ? "1" : "0 0 auto",
 																},
 																values: Object.keys(this.attrValues.value || {}).filter(
@@ -1390,46 +1404,46 @@ export default {
 															})
 														]);
 													}),
-												]
-											),
-											this.selectedAggregators.length > 1
-												? h(
-														"a",
-														{
-															class: ["pvtAggregatorRemove"],
-															role: "button",
-															title: __('Remove aggregation'),
-															onClick: (event) => {
-																event?.preventDefault?.();
-																this.removeAggregator(index);
+												],
+												this.selectedAggregators.length > 1
+													? h(
+															"a",
+															{
+																class: ["pvtAggregatorRemove"],
+																role: "button",
+																title: __('Remove aggregation'),
+																onClick: (event) => {
+																	event?.preventDefault?.();
+																	this.removeAggregator(index);
+																},
 															},
-														},
-														"×"
-												  )
-												: null,
+															"×"
+													  )
+													: null
+											),
 										]
 									);
 								})
 							),
-							this.selectedAggregators.length < this.availableAggregators.length
-								? h(
-										"a",
-										{
-											class: ["pvtAggregatorAdd"],
-											role: "button",
-											title: __('Add another aggregation'),
-											onClick: (event) => {
-												event?.preventDefault?.();
-												this.addAggregator();
-											},
-										},
-										"+"
-								  )
-								: null,
 							h(
 								"div",
 								{ class: ["pvtAggregatorOrders"] },
 								[
+									this.selectedAggregators.length < this.availableAggregators.length
+										? h(
+												"a",
+												{
+													class: ["pvtAggregatorAdd"],
+													role: "button",
+													title: __('Add another aggregation'),
+													onClick: (event) => {
+														event?.preventDefault?.();
+														this.addAggregator();
+													},
+												},
+												"+"
+										  )
+										: null,
 									h(
 										"a",
 										{
@@ -1766,6 +1780,10 @@ export default {
 			})(),
 			isCalculating: this.isCalculating,
 			calculationError: this.calculationError,
+			// Virtualization props
+			enableVirtualization: this.enableVirtualization !== undefined ? this.enableVirtualization : false,
+			virtualizationThreshold: this.virtualizationThreshold !== undefined ? this.virtualizationThreshold : 100,
+			virtualizationMaxHeight: this.virtualizationMaxHeight !== undefined ? this.virtualizationMaxHeight : 600,
 		};
 
 		const rendererCell = this.rendererCell(rendererName);
