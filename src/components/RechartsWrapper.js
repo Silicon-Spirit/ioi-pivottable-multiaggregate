@@ -1,4 +1,4 @@
-import { h, defineComponent, computed } from 'vue';
+import { h, defineComponent, computed, ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
@@ -137,6 +137,7 @@ export default defineComponent({
 				// Pie chart - combine all series into one pie
 				let pieData = [];
 				// Process labels and datasets - allow null values
+				// Check after processing if we have valid data
 				if (labels && labels.length > 0 && datasets && datasets.length > 0) {
 					labels.forEach((label, labelIndex) => {
 						// Allow "(null)" as a valid label (display format for null values)
@@ -292,25 +293,10 @@ export default defineComponent({
 							borderWidth: 2
 						},
 						label: {
-							show: legendItems.length < 15, // Show labels only if not too many items
-							position: 'outside',
-							formatter: (params) => {
-								const total = pieData.reduce((sum, item) => sum + item.value, 0);
-								const percentage = total > 0 ? ((params.value / total) * 100).toFixed(1) : 0;
-								return `${truncateLabel(params.name, 15)}\n${percentage}%`;
-							},
-							fontSize: 11,
-							color: '#333',
-							lineHeight: 16
+							show: false // Hide all labels - only show tooltip on hover
 						},
 						labelLine: {
-							show: legendItems.length < 15,
-							length: 15,
-							length2: 10,
-							lineStyle: {
-								color: '#666',
-								width: 1
-							}
+							show: false // Hide label lines since labels are hidden
 						},
 						// Better animation
 						animationType: 'scale',
@@ -600,25 +586,29 @@ export default defineComponent({
 				// Calculate space needed for labels below the grid
 				// This will be used to calculate canvas height
 				// The grid bottom will be calculated to maintain fixed chart data area height
-				// Reduce spacing to minimize gap between labels and dataZoom
-				let labelSpaceNeeded = 50; // Reduced base space for labels
+				// FIXED gap between labels and dataZoom to maintain consistent UI
 				const dataZoomHeight = 20; // Height of dataZoom slider
-				const minGap = 5; // Minimum gap between labels and dataZoom
+				const fixedGap = 5; // Fixed gap between labels and dataZoom (always constant)
+				const bottomMargin = 10; // Fixed bottom margin
+				const fixedGapTotal = fixedGap + dataZoomHeight + bottomMargin; // Always 35px total
 				
+				// Calculate label height needed (can vary, but cap at reasonable maximum)
+				let labelHeight = 30; // Base label height
 				if (isRotated) {
-					// For rotated labels, calculate space based on character length
-					// Formula: label height + small gap + dataZoom height + bottom margin
-					const labelHeight = Math.max(40, maxLabelLength * 5); // Reduced multiplier
-					labelSpaceNeeded = labelHeight + minGap + dataZoomHeight + 10; // Total: label + gap + slider + margin
+					// For rotated labels, calculate space but cap at maximum
+					// Cap at 120px to prevent excessive space
+					labelHeight = Math.min(120, Math.max(40, maxLabelLength * 5));
 				} else {
 					if (maxLabelLength > 50) {
-						// Very long labels might wrap
-						const labelHeight = Math.ceil(maxLabelLength / 10) * 15; // Reduced spacing
-						labelSpaceNeeded = labelHeight + minGap + dataZoomHeight + 10;
+						// Very long labels might wrap, but cap at reasonable maximum
+						labelHeight = Math.min(100, Math.ceil(maxLabelLength / 10) * 15);
 					} else {
-						labelSpaceNeeded = 30 + minGap + dataZoomHeight + 10; // Base label + gap + slider + margin
+						labelHeight = 30; // Base label height
 					}
 				}
+				
+				// Total space = label height (variable, capped) + fixed gap (always constant)
+				const labelSpaceNeeded = labelHeight + fixedGapTotal;
 				
 				// Grid bottom will be calculated dynamically to maintain fixed chart data area height
 				// Grid area = canvasHeight - gridTop - gridBottom = fixedChartDataAreaHeight
@@ -726,7 +716,7 @@ export default defineComponent({
 					},
 					grid: {
 						left: '3%',
-						right: '4%',
+						right: '10%', // Increased right margin to accommodate vertical dataZoom slider (20px width + gap)
 						top: `${gridTopPx}px`, // Fixed pixel position to maintain consistent gap
 						// Grid bottom will be calculated to maintain fixed chart data area height
 						// The grid area = canvasHeight - gridTop - gridBottom = fixedChartDataAreaHeight
@@ -795,7 +785,7 @@ export default defineComponent({
 							yAxisIndex: [0],
 							start: 0,
 							end: 100,
-							right: '5%',
+							right: '2%', // Positioned outside grid area with gap from chart data
 							width: 20,
 							handleIcon: 'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23.1h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
 							handleSize: '80%',
@@ -857,11 +847,9 @@ export default defineComponent({
 							formatter: (value) => {
 								return formatLabelForDisplay(value);
 							},
-							// Better styling for labels
-							textStyle: {
-								fontSize: 11,
-								color: '#666'
-							},
+							// Better styling for labels - moved directly to axisLabel (ECharts 4.0+)
+							fontSize: 11,
+							color: '#666',
 							// Add margin for rotated labels
 							margin: filteredLabels.length > 5 ? 12 : 8
 						},
@@ -885,10 +873,9 @@ export default defineComponent({
 								}
 								return value;
 							},
-							textStyle: {
-								color: '#666',
-								fontSize: 11
-							}
+							// Styling moved directly to axisLabel (ECharts 4.0+)
+							color: '#666',
+							fontSize: 11
 						},
 						// Better axis line
 						axisLine: {
@@ -917,6 +904,37 @@ export default defineComponent({
 			}
 		});
 
+		// Responsive chart container ref
+		const chartContainer = ref(null);
+		
+		// Resize handler for responsive behavior
+		const handleResize = () => {
+			// Chart will auto-resize via autoresize prop
+		};
+		
+		onMounted(() => {
+			nextTick(() => {
+				if (window.ResizeObserver && chartContainer.value) {
+					const resizeObserver = new ResizeObserver(() => {
+						handleResize();
+					});
+					resizeObserver.observe(chartContainer.value);
+					
+					// Store observer for cleanup
+					chartContainer.value._resizeObserver = resizeObserver;
+				} else {
+					window.addEventListener('resize', handleResize);
+				}
+			});
+		});
+		
+		onUnmounted(() => {
+			if (chartContainer.value && chartContainer.value._resizeObserver) {
+				chartContainer.value._resizeObserver.disconnect();
+			}
+			window.removeEventListener('resize', handleResize);
+		});
+		
 		return () => {
 			// Base chart data area height - minimum height for the chart visualization
 			const baseChartDataAreaHeight = 500;
@@ -1004,26 +1022,30 @@ export default defineComponent({
 					
 					// Calculate extra space needed for labels below the fixed grid bottom
 					// This space is added to canvas height but doesn't affect the grid (chart data area)
-					// Calculate space needed for labels with minimal gap to dataZoom
-					// Reduce spacing to minimize gap between labels and dataZoom slider
+					// Calculate space needed for labels with FIXED gap to dataZoom
+					// The gap between labels and dataZoom must remain constant
 					const dataZoomHeight = 20; // Height of dataZoom slider
-					const minGap = 5; // Minimum gap between labels and dataZoom
+					const fixedGap = 5; // Fixed gap between labels and dataZoom (always constant)
+					const bottomMargin = 10; // Fixed bottom margin
+					const fixedGapTotal = fixedGap + dataZoomHeight + bottomMargin; // Always 35px total
 					
-					let labelSpaceNeeded = 50; // Reduced base space
+					// Calculate label height needed (can vary, but cap at reasonable maximum)
+					let labelHeight = 30; // Base label height
 					if (isRotated) {
-						// For rotated labels, calculate space based on character count
-						// Reduced multiplier for tighter spacing
-						const labelHeight = Math.max(40, maxLabelLength * 5);
-						labelSpaceNeeded = labelHeight + minGap + dataZoomHeight + 10; // label + gap + slider + margin
+						// For rotated labels, calculate space but cap at maximum
+						// Cap at 120px to prevent excessive space
+						labelHeight = Math.min(120, Math.max(40, maxLabelLength * 5));
 					} else {
 						if (maxLabelLength > 50) {
-							// Very long labels might wrap
-							const labelHeight = Math.ceil(maxLabelLength / 10) * 15;
-							labelSpaceNeeded = labelHeight + minGap + dataZoomHeight + 10;
+							// Very long labels might wrap, but cap at reasonable maximum
+							labelHeight = Math.min(100, Math.ceil(maxLabelLength / 10) * 15);
 						} else {
-							labelSpaceNeeded = 30 + minGap + dataZoomHeight + 10; // Base + gap + slider + margin
+							labelHeight = 30; // Base label height
 						}
 					}
+					
+					// Total space = label height (variable, capped) + fixed gap (always constant)
+					const labelSpaceNeeded = labelHeight + fixedGapTotal;
 					
 					// Calculate legend height
 					let legendHeight = 40; // Base legend height
@@ -1061,17 +1083,22 @@ export default defineComponent({
 			}
 			
 			return h('div', {
+				ref: chartContainer,
 				style: {
 					width: '100%',
 					height: `${canvasHeight}px`,
-					minHeight: '600px'
+					minHeight: '600px',
+					position: 'relative',
+					overflow: 'hidden'
 				}
 			}, [
 				h(VChart, {
 					option: finalChartOption,
+					autoresize: true, // Enable automatic resizing for responsive behavior
 					style: {
 						width: '100%',
-						height: `${canvasHeight}px` // Dynamic canvas height to accommodate labels, but grid data area stays fixed
+						height: '100%',
+						minHeight: '600px'
 					}
 				})
 			]);
