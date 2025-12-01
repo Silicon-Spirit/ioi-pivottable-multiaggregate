@@ -200,8 +200,32 @@ function makeRenderer(opts = {}) {
 				const primaryAggregator = aggregatorList[0];
 
 				// Check if we have data (either from pivotData or pivotResult)
-				const hasData = pivotData ? Object.keys(pivotData.tree).length > 0 : 
-					(this.pivotResult && this.pivotResult.tree && Object.keys(this.pivotResult.tree).length > 0);
+				// For pivotData, check if tree exists and has keys
+				// For pivotResult, check if tree exists and has keys, or if rowKeys/colKeys exist
+				let hasData = false;
+				if (pivotData) {
+					hasData = pivotData.tree && Object.keys(pivotData.tree).length > 0;
+				} else if (this.pivotResult) {
+					// Check if tree exists and has data, or if we have rowKeys/colKeys
+					hasData = (this.pivotResult.tree && Object.keys(this.pivotResult.tree).length > 0) ||
+						(this.pivotResult.rowKeys && this.pivotResult.rowKeys.length > 0) ||
+						(this.pivotResult.colKeys && this.pivotResult.colKeys.length > 0);
+				}
+				
+				// If no primaryAggregator but we have aggregatorList, try to get one
+				if (!primaryAggregator && aggregatorList.length > 0) {
+					aggregatorList = aggregatorList.filter(name => name && typeof name === 'string' && name.length > 0);
+				}
+				
+				// If still no aggregator, try to get from props
+				// Prioritize aggregatorList[0] since it comes from the actual data source (pivotResult or pivotData)
+				const finalAggregator = primaryAggregator || aggregatorList[0] || this.aggregatorName || (Array.isArray(this.aggregatorNames) && this.aggregatorNames[0]) || 'Count';
+				
+				// When using pivotResult, ensure we use an aggregator name that exists in the tree
+				// If finalAggregator doesn't exist in aggregatorList, use the first one from aggregatorList
+				const effectiveAggregator = (this.usePreCalculatedResult && this.pivotResult && aggregatorList.length > 0 && !aggregatorList.includes(finalAggregator))
+					? aggregatorList[0]
+					: finalAggregator;
 				
 				if (hasData) {
 
@@ -215,7 +239,7 @@ function makeRenderer(opts = {}) {
 					const headerRow = [];
 
 					if (colKeys.length === 1 && colKeys[0].length === 0) {
-						headerRow.push(primaryAggregator || this.aggregatorName);
+						headerRow.push(effectiveAggregator);
 					} else {
 						colKeys.map((col) => {
 							// Include null values in header display - convert "null" to "(null)" for better visibility
@@ -237,8 +261,8 @@ function makeRenderer(opts = {}) {
 							if (pivotData) {
 								// Use PivotData instance
 								const aggregator =
-									primaryAggregator
-										? pivotData.getAggregator(r, c, primaryAggregator)
+									effectiveAggregator
+										? pivotData.getAggregator(r, c, effectiveAggregator)
 										: pivotData.getAggregator(r, c);
 								v = aggregator && typeof aggregator.value === "function"
 									? aggregator.value()
@@ -247,16 +271,35 @@ function makeRenderer(opts = {}) {
 								// Use pre-calculated result (Top-N already applied)
 								const flatRowKey = r.join(String.fromCharCode(0));
 								const flatColKey = c.join(String.fromCharCode(0));
-								const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[primaryAggregator];
+								// Try effectiveAggregator first, then try all aggregators in aggregatorList
+								let cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[effectiveAggregator];
+								if (!cellData && aggregatorList.length > 0) {
+									// Try each aggregator until we find one with data
+									for (const aggName of aggregatorList) {
+										cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+										if (cellData) break;
+									}
+								}
 								if (cellData) {
 									v = cellData.value;
 								}
 							}
 							
-							row.push(v || "");
+							// Preserve 0 values - don't convert them to empty strings
+							// Only convert null/undefined to empty string
+							if (v === null || v === undefined) {
+								row.push("");
+							} else {
+								row.push(v);
+							}
 						});
 						return row;
 					});
+
+					// Ensure headerRow is not empty
+					if (headerRow.length === 0 && effectiveAggregator) {
+						headerRow.push(effectiveAggregator);
+					}
 
 					rawData.unshift(headerRow);
 
@@ -275,34 +318,85 @@ function makeRenderer(opts = {}) {
 						});
 
 					// Filter datasets to exclude those with null in their names
-					// Also filter out datasets where the name contains "null"
-					const datasets = rawData[0]
+					// But allow "(null)" which is a valid display value
+					// Ensure rawData[0] exists and has data
+					const datasets = (rawData[0] && rawData[0].length > 0) ? rawData[0]
 						.map((name, index) => {
-							// Skip if name is null, empty, contains "null", or is just "null"
-							if (!name || name === "" || name === "null" || String(name).includes("null")) {
+							// Skip if name is null, empty, or is exactly "null" (but allow "(null)")
+							if (!name || name === "" || name === "null") {
 								return null;
 							}
-						const values = rawData.slice(1).map(row => row[index]);
+							// Allow "(null)" as it's a valid display value for null data
+							// Extract values, preserving 0 and converting null/undefined to empty string
+							const values = rawData.slice(1).map(row => {
+								if (row && row[index] !== undefined) {
+									// Preserve the value, including 0
+									return row[index];
+								}
+								// Only use empty string for missing values
+								return "";
+							});
 						return {
 							name: name,
 							values: values
 							};
 						})
-						.filter(dataset => dataset !== null && dataset.name && !String(dataset.name).includes("null"));
+						.filter(dataset => dataset !== null && dataset.name) : [];
+
+					// If all datasets were filtered out, check if we can create a default dataset
+					// This can happen if all column names contain "null" but we still have data
+					if (datasets.length === 0 && rawData.length > 1) {
+						// Try to create a dataset from the first column if it exists
+						if (rawData[0] && rawData[0].length > 0) {
+							// Use the aggregator name or a default name
+							const datasetName = effectiveAggregator || 'Data';
+							// Extract values, preserving 0 and converting null/undefined to 0
+							const values = rawData.slice(1).map(row => {
+								if (row && row[0] !== undefined && row[0] !== null) {
+									return row[0];
+								}
+								return 0;
+							});
+							datasets.push({
+								name: datasetName,
+								values: values
+							});
+						}
+					}
 
 					let data = {
 						labels: labels,
 						datasets: datasets
 					}
 
-					// Format values empty string to number to fix pie/percentage charts issues
-					const isNumber = data.datasets.some(entry => 
+					// Format values: convert empty strings to 0, and string numbers to actual numbers
+					if (data.datasets.length > 0) {
+						// Check if any value is a number (to determine if we should convert strings to numbers)
+						const hasNumbers = data.datasets.some(entry => 
 						entry.values.some(value => typeof value === "number")
 					);
 
-					if (isNumber == true) {				
+						// Convert values: empty strings -> 0, string numbers -> numbers, preserve existing numbers
 						data.datasets.forEach(entry => {
-							entry.values = entry.values.map(value => value === "" ? 0 : value);
+							entry.values = entry.values.map(value => {
+								// If already a number, keep it (including 0)
+								if (typeof value === "number") {
+									return value;
+								}
+								// If empty string, convert to 0
+								if (value === "" || value === null || value === undefined) {
+									return 0;
+								}
+								// If it's a string that looks like a number, convert it
+								if (typeof value === "string" && hasNumbers) {
+									const numValue = parseFloat(value);
+									if (!isNaN(numValue) && isFinite(numValue)) {
+										return numValue;
+									}
+								}
+								// Otherwise, keep the original value
+								return value;
+							});
 						});
 					}
 
@@ -2166,10 +2260,10 @@ function makeRenderer(opts = {}) {
 						chartType = 'percentage';
 					}
 
-				// Check if we should use worker for LTTB optimization (line/bar charts with large data)
-				const useWorkerForLTTB = pivotWorkerManager.isAvailable() && 
-					(chartType === 'line' || chartType === 'bar') &&
-					chartData && chartData.labels && chartData.labels.length > 500;
+					// Check if we should use worker for LTTB optimization (line/bar charts with large data)
+					const useWorkerForLTTB = pivotWorkerManager.isAvailable() && 
+						(chartType === 'line' || chartType === 'bar') &&
+						chartData && chartData.labels && chartData.labels.length > 500;
 
 				return h('div', {
 						style: {
