@@ -185,7 +185,7 @@ export default {
 					// Parse Excel file with maximum performance options
 					const workbook = XLSX.read(arrayBuffer, { 
 						type: 'array',
-						cellDates: false, // Disable date parsing for speed
+						cellDates: false,
 						cellNF: false,
 						cellStyles: false,
 						sheetStubs: false,
@@ -194,46 +194,79 @@ export default {
 						bookFiles: false,
 						bookVBA: false,
 						WTF: false,
-						dense: false // Use sparse mode (faster)
+						dense: true // Use dense mode for faster access
 					});
 					
 					// Get first sheet
 					const firstSheetName = workbook.SheetNames[0];
 					const worksheet = workbook.Sheets[firstSheetName];
 					
-					// Convert to JSON with raw values for maximum speed
-					let jsonData = XLSX.utils.sheet_to_json(worksheet, {
-						raw: true, // Keep raw values (much faster!)
-						defval: null,
-						blankrows: false // Skip blank rows
-					});
-
-					// Limit to 500,000 rows
+					// CRITICAL: Use same optimization as worker - direct dense mode access
+					// Return array of arrays format (same as worker) for consistency
+					let processedData;
+					if (worksheet['!data'] && Array.isArray(worksheet['!data'])) {
+						// Dense mode: use !data directly (much faster!)
+						const rawData = worksheet['!data'];
+						const maxRows = 500000;
+						const rowsToProcess = Math.min(rawData.length, maxRows + 1);
+						
+						// Pre-allocate result array for better performance
+						processedData = new Array(rowsToProcess);
+						
+						// Ultra-optimized cell extraction (same as worker)
+						for (let i = 0; i < rowsToProcess; i++) {
+							const row = rawData[i];
+							if (!Array.isArray(row)) {
+								processedData[i] = [];
+								continue;
+							}
+							
+							const rowLength = row.length;
+							const newRow = new Array(rowLength);
+							
+							for (let j = 0; j < rowLength; j++) {
+								const cell = row[j];
+								// Fast path: check for object first (most common case)
+								newRow[j] = (cell && typeof cell === 'object' && 'v' in cell) 
+									? (cell.v != null ? cell.v : null)
+									: (cell != null ? cell : null);
+							}
+							processedData[i] = newRow;
+						}
+					} else {
+						// Sparse mode: use sheet_to_json with array of arrays
+						processedData = XLSX.utils.sheet_to_json(worksheet, {
+							raw: true,
+							defval: null,
+							blankrows: false,
+							header: 1
+						});
+					}
+					
+					// Data is already limited in dense mode, check if we need to limit for sparse mode
 					const maxRows = 500000;
-					if (jsonData.length > maxRows) {
-						const proceed = confirm(`The file contains ${jsonData.length.toLocaleString()} rows. Processing more than ${maxRows.toLocaleString()} rows may cause the browser to freeze. Do you want to process only the first ${maxRows.toLocaleString()} rows?`);
+					if (processedData.length - 1 > maxRows) {
+						const proceed = confirm(`The file contains ${(processedData.length - 1).toLocaleString()} rows. Processing more than ${maxRows.toLocaleString()} rows may cause the browser to freeze. Do you want to process only the first ${maxRows.toLocaleString()} rows?`);
 						if (!proceed) {
 							event.target.value = '';
 							uploading.value = false;
 							uploadProgress.value = 0;
 							return;
 						}
-						jsonData = jsonData.slice(0, maxRows);
+						processedData = processedData.slice(0, maxRows + 1);
 					}
-
+					
 					// CRITICAL OPTIMIZATION: Skip transformation entirely for maximum performance
 					// With defval: null, empty cells are already null
 					// The pivot engine handles empty strings by converting them to "null" string anyway
 					// So we don't need to transform empty strings to null - just use data as-is
 					uploadProgress.value = 100;
-					
-					// Use the modified jsonData directly - no need to copy
-					const processedData = jsonData;
 
 					// CRITICAL: Reset header fields to empty before setting new data
 					rows.value = [];
 					cols.value = [];
 					
+					// Use processedData directly (already in array of arrays format)
 					currentData.value = processedData;
 					
 					// Reset file input

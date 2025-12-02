@@ -37,45 +37,83 @@ self.onmessage = async (e) => {
 			const firstSheetName = workbook.SheetNames[0];
 			const worksheet = workbook.Sheets[firstSheetName];
 			
-			// CRITICAL OPTIMIZATION: Use sheet_to_json with header: 1 (array of arrays)
-			// This is the fastest format and pivot engine handles it directly
+			// CRITICAL OPTIMIZATION: For dense mode, access data directly from !data property
+			// This is MUCH faster than sheet_to_json for large files!
 			const jsonStart = performance.now();
+			let aoa;
 			
-			// Get sheet range to determine limits
-			const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-			const totalSheetRows = range.e.r + 1;
-			const rowsToProcess = Math.min(totalSheetRows, maxRows + 1);
-			
-			// CRITICAL: Limit the range BEFORE parsing to speed up sheet_to_json
-			// This tells XLSX to only parse the rows we need
-			if (rowsToProcess < totalSheetRows) {
-				// Create limited range
-				const limitedRange = XLSX.utils.encode_range({
-					s: { r: 0, c: 0 },
-					e: { r: rowsToProcess - 1, c: range.e.c }
-				});
-				// Temporarily set limited range
-				const originalRef = worksheet['!ref'];
-				worksheet['!ref'] = limitedRange;
+			// Check if we have dense mode data (faster direct access)
+			if (worksheet['!data'] && Array.isArray(worksheet['!data'])) {
+				// Dense mode: !data is a 2D array - use it directly!
+				// This avoids the overhead of sheet_to_json conversion
+				const rawData = worksheet['!data'];
 				
-				// Parse with limited range
-				var aoa = XLSX.utils.sheet_to_json(worksheet, {
-					raw: true,
-					defval: null,
-					blankrows: false,
-					header: 1
-				});
+				// CRITICAL: Limit rows BEFORE processing to reduce work
+				const rowsToProcess = Math.min(rawData.length, maxRows + 1);
+				const totalRows = rawData.length;
 				
-				// Restore original range
-				worksheet['!ref'] = originalRef;
+				// Pre-allocate result array for better performance
+				aoa = new Array(rowsToProcess);
+				
+				// Convert cell objects to values (dense mode stores cells as objects)
+				// ULTRA-OPTIMIZED: Minimize property access and type checks
+				for (let i = 0; i < rowsToProcess; i++) {
+					const row = rawData[i];
+					if (!Array.isArray(row)) {
+						aoa[i] = [];
+						continue;
+					}
+					
+					const rowLength = row.length;
+					const newRow = new Array(rowLength);
+					
+					// Ultra-fast cell extraction: cache typeof check, minimize property access
+					for (let j = 0; j < rowLength; j++) {
+						const cell = row[j];
+						// Fast path: check for object first (most common case)
+						newRow[j] = (cell && typeof cell === 'object' && 'v' in cell) 
+							? (cell.v != null ? cell.v : null)
+							: (cell != null ? cell : null);
+					}
+					aoa[i] = newRow;
+				}
 			} else {
-				// Parse full sheet
-				var aoa = XLSX.utils.sheet_to_json(worksheet, {
-					raw: true,
-					defval: null,
-					blankrows: false,
-					header: 1
-				});
+				// Sparse mode: use sheet_to_json (slower but necessary)
+				// Get sheet range to determine limits
+				const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+				const totalSheetRows = range.e.r + 1;
+				const rowsToProcess = Math.min(totalSheetRows, maxRows + 1);
+				
+				// CRITICAL: Limit the range BEFORE parsing to speed up sheet_to_json
+				if (rowsToProcess < totalSheetRows) {
+					// Create limited range
+					const limitedRange = XLSX.utils.encode_range({
+						s: { r: 0, c: 0 },
+						e: { r: rowsToProcess - 1, c: range.e.c }
+					});
+					// Temporarily set limited range
+					const originalRef = worksheet['!ref'];
+					worksheet['!ref'] = limitedRange;
+					
+					// Parse with limited range
+					aoa = XLSX.utils.sheet_to_json(worksheet, {
+						raw: true,
+						defval: null,
+						blankrows: false,
+						header: 1
+					});
+					
+					// Restore original range
+					worksheet['!ref'] = originalRef;
+				} else {
+					// Parse full sheet
+					aoa = XLSX.utils.sheet_to_json(worksheet, {
+						raw: true,
+						defval: null,
+						blankrows: false,
+						header: 1
+					});
+				}
 			}
 			
 			const jsonTime = performance.now() - jsonStart;
@@ -92,15 +130,9 @@ self.onmessage = async (e) => {
 				return;
 			}
 
-			// Limit rows if needed
-			const totalRows = Math.min(aoa.length - 1, maxRows);
-			if (aoa.length - 1 > maxRows) {
-				// Include header row + limited data rows
-				const limitedAoa = [aoa[0], ...aoa.slice(1, maxRows + 1)];
-				var processedData = limitedAoa;
-			} else {
-				var processedData = aoa;
-			}
+			// Data is already limited, just calculate row count
+			const totalRows = Math.max(0, aoa.length - 1);
+			const processedData = aoa;
 
 			const processTime = performance.now();
 			const totalDuration = processTime - startTime;
