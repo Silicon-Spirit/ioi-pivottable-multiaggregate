@@ -4,6 +4,12 @@ import PivottableUi from "../components/PivottableUi.js";
 import TableRenderer, { makeRenderer } from "../components/TableRenderer.js";
 import { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs, PivotData } from "../utils/utils.js";
 
+// Export composables
+export * from "../composables/index.js";
+
+// Export helpers
+export * from "../helpers/index.js";
+
 // Export main components
 export { Pivottable, PivottableUi, TableRenderer, makeRenderer };
 
