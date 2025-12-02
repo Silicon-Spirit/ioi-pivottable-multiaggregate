@@ -2220,7 +2220,7 @@ function makeRenderer(opts = {}) {
 					// Helper function to create warning element
 					const createWarningElement = () => {
 						if (!this.dataLimitWarning) return null;
-						return h('div', {
+				return h('div', {
 							style: {
 								padding: '10px',
 								backgroundColor: '#fff3cd',

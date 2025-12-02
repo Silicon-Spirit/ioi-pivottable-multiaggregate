@@ -4,7 +4,7 @@
 
 /**
  * Counts the number of unique values for each field in the data
- * @param {Array<Object>} data - Array of data objects
+ * @param {Array<Object>|Array<Array>} data - Array of data objects or array of arrays (first row is headers)
  * @returns {Object} Object with field names as keys and unique count as values
  */
 export function countUniqueValuesPerField(data) {
@@ -15,25 +15,63 @@ export function countUniqueValuesPerField(data) {
 	const fieldCounts = {};
 	const fieldSets = {};
 
-	// Initialize sets for each field
-	const firstRecord = data[0];
-	for (const field in firstRecord) {
-		fieldSets[field] = new Set();
-	}
+	// Check if data is array of arrays format
+	// Array of arrays: first element is an array, and if there's a second element, it's also an array
+	// Array of objects: first element is an object (not an array)
+	const isArrayOfArrays = Array.isArray(data[0]) && 
+	                        (data.length === 1 || Array.isArray(data[1]));
 
-	// Count unique values for each field
-	data.forEach(record => {
-		for (const field in record) {
-			const value = record[field];
-			// Convert value to string for consistent comparison
-			// Handle null/undefined
-			if (value === null || value === undefined) {
-				fieldSets[field].add('null');
-			} else {
-				fieldSets[field].add(String(value));
+	if (isArrayOfArrays && data.length > 1) {
+		// Array of arrays format: first row is headers, rest are data rows
+		const headers = data[0];
+		const headerCount = headers.length;
+
+		// Initialize sets for each header
+		for (let i = 0; i < headerCount; i++) {
+			const fieldName = headers[i] != null ? String(headers[i]) : `Column${i + 1}`;
+			fieldSets[fieldName] = new Set();
+		}
+
+		// Count unique values for each field
+		for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
+			const row = data[rowIndex];
+			if (!Array.isArray(row)) continue;
+
+			for (let colIndex = 0; colIndex < headerCount && colIndex < row.length; colIndex++) {
+				const fieldName = headers[colIndex] != null ? String(headers[colIndex]) : `Column${colIndex + 1}`;
+				const value = row[colIndex];
+				
+				// Convert value to string for consistent comparison
+				// Handle null/undefined
+				if (value === null || value === undefined) {
+					fieldSets[fieldName].add('null');
+				} else {
+					fieldSets[fieldName].add(String(value));
+				}
 			}
 		}
-	});
+	} else {
+		// Array of objects format (original behavior)
+		// Initialize sets for each field
+		const firstRecord = data[0];
+		for (const field in firstRecord) {
+			fieldSets[field] = new Set();
+		}
+
+		// Count unique values for each field
+		data.forEach(record => {
+			for (const field in record) {
+				const value = record[field];
+				// Convert value to string for consistent comparison
+				// Handle null/undefined
+				if (value === null || value === undefined) {
+					fieldSets[field].add('null');
+				} else {
+					fieldSets[field].add(String(value));
+				}
+			}
+		});
+	}
 
 	// Convert sets to counts
 	for (const field in fieldSets) {

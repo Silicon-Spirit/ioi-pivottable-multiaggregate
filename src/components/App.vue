@@ -221,35 +221,11 @@ export default {
 						jsonData = jsonData.slice(0, maxRows);
 					}
 
-					// CRITICAL OPTIMIZATION: Modify rows in-place instead of creating new objects
-					// This eliminates object creation overhead which is the main bottleneck
-					const totalRows = jsonData.length;
-					
-					// Process all rows with in-place modification
-					// With raw: true, numbers are already numbers
-					for (let i = 0; i < totalRows; i++) {
-						const row = jsonData[i];
-						
-						// Fast in-place modification - only convert empty strings to null
-						const keys = Object.keys(row);
-						for (let j = 0, len = keys.length; j < len; j++) {
-							const key = keys[j];
-							const value = row[key];
-							// Only convert empty strings - everything else stays as-is
-							if (value === '' || value === 'null') {
-								row[key] = null;
-							}
-						}
-						
-						// Update progress every 10k rows to reduce overhead
-						if ((i + 1) % 10000 === 0 || i === totalRows - 1) {
-							uploadProgress.value = Math.round(((i + 1) / totalRows) * 100);
-							// Yield to browser occasionally
-							if (i % 50000 === 0 && i > 0) {
-								await new Promise(resolve => setTimeout(resolve, 0));
-							}
-						}
-					}
+					// CRITICAL OPTIMIZATION: Skip transformation entirely for maximum performance
+					// With defval: null, empty cells are already null
+					// The pivot engine handles empty strings by converting them to "null" string anyway
+					// So we don't need to transform empty strings to null - just use data as-is
+					uploadProgress.value = 100;
 					
 					// Use the modified jsonData directly - no need to copy
 					const processedData = jsonData;
@@ -784,9 +760,24 @@ export default {
 			rows.value = [];
 			cols.value = [];
 
+			// Check if data is array of arrays format
+			const isArrayOfArrays = Array.isArray(currentData.value[0]) && 
+			                        (currentData.value[0].length > 0 || currentData.value.length > 1);
+
 			// Find numeric fields for values
 			const numericFields = allFields.filter(field => {
-				const sampleValue = currentData.value.find(r => r[field] != null)?.[field];
+				let sampleValue;
+				if (isArrayOfArrays && currentData.value.length > 1) {
+					// Array of arrays: find field index in headers, then get value from first data row
+					const headers = currentData.value[0];
+					const fieldIndex = headers.findIndex(h => String(h) === field);
+					if (fieldIndex >= 0 && currentData.value.length > 1) {
+						sampleValue = currentData.value[1][fieldIndex];
+					}
+				} else {
+					// Array of objects: use original logic
+					sampleValue = currentData.value.find(r => r[field] != null)?.[field];
+				}
 				return typeof sampleValue === 'number';
 			});
 			
