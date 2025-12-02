@@ -240,6 +240,7 @@ export default {
 			isCalculating: false,
 			calculationError: null,
 			debounceTimer: null,
+			calculationAbortController: null, // For cancelling ongoing calculations
 			// LRU Cache for materialized input and attrValues (max 5 entries)
 			materializedDataCache: new LRUCache(5),
 			// LRU Cache for worker calculation results (max 5 entries)
@@ -271,7 +272,9 @@ export default {
 		// Ensure pivotResult is always initialized as a valid shallowRef
 		// This prevents "Cannot set properties of null" errors
 		// Check if pivotResult exists and is a valid object with 'value' property
-		if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
+		// typeof null === 'object' in JavaScript, so we need explicit null check before using 'in' operator
+		const pivotResultCheck = this.pivotResult;
+		if (!pivotResultCheck || pivotResultCheck === null || typeof pivotResultCheck !== 'object' || !('value' in pivotResultCheck)) {
 			this.pivotResult = shallowRef(null);
 		}
 		
@@ -319,6 +322,10 @@ export default {
 		// Clean up debounce timer
 		if (this.debounceTimer) {
 			clearTimeout(this.debounceTimer);
+		}
+		// Cancel any ongoing calculation
+		if (this.calculationAbortController) {
+			this.calculationAbortController.abort();
 		}
 	},
 	watch: {
@@ -649,7 +656,6 @@ export default {
 				// Use cached materialized data
 				this.materializedInput.value = cachedData.materializedInput;
 				this.attrValues.value = cachedData.attrValues;
-				console.log(`[Cache] Using cached materialized input (${this.data.length} records, cache size: ${this.materializedDataCache.size})`);
 				// Trigger pivot recalculation after materialization
 				this.calculatePivot();
 				return;
@@ -697,8 +703,6 @@ export default {
 				attrValues: JSON.parse(JSON.stringify(attrValues)) // Deep copy
 			});
 			
-			console.log(`[Performance] Materialization: ${(materializeEndTime - materializeStartTime).toFixed(2)}ms for ${this.data.length} records`);
-			
 			// Trigger pivot recalculation after materialization
 			this.calculatePivot();
 		},
@@ -706,6 +710,19 @@ export default {
 			// Always set calculating state immediately to show loading indicator
 			// This ensures smooth UI even for small datasets
 			this.isCalculating = true;
+			
+			// Calculate debounce time based on dataset size
+			// Larger datasets need more time to prevent excessive recalculations
+			const dataSize = Array.isArray(this.data) ? this.data.length : 0;
+			let debounceTime = 150; // Default 150ms for small datasets
+			
+			if (dataSize > 100000) {
+				debounceTime = 500; // 500ms for very large datasets (100k+)
+			} else if (dataSize > 50000) {
+				debounceTime = 300; // 300ms for large datasets (50k-100k)
+			} else if (dataSize > 10000) {
+				debounceTime = 200; // 200ms for medium datasets (10k-50k)
+			}
 			
 			// For initial calculation, don't debounce - start immediately
 			// For subsequent changes, debounce to avoid excessive worker calls
@@ -720,20 +737,23 @@ export default {
 					this.performPivotCalculation();
 				});
 			} else {
-				// Debounce subsequent calculations
+				// Debounce subsequent calculations with adaptive timing
 				if (this.debounceTimer) {
 					clearTimeout(this.debounceTimer);
 				}
 
 				this.debounceTimer = setTimeout(async () => {
 					await this.performPivotCalculation();
-				}, 150); // 150ms debounce
+				}, debounceTime);
 			}
 		},
 		async performPivotCalculation() {
 			if (!Array.isArray(this.data) || this.data.length === 0) {
-				if (this.pivotResult) {
-					this.pivotResult.value = null;
+				// Must check for null explicitly before accessing 'value' property
+				// Store in local variable to avoid reactivity issues
+				const pivotResultRef = this.pivotResult;
+				if (pivotResultRef && pivotResultRef !== null && typeof pivotResultRef === 'object' && 'value' in pivotResultRef) {
+					pivotResultRef.value = null;
 				}
 				return;
 			}
@@ -751,6 +771,12 @@ export default {
 				!hasFunctionSorters;
 
 			if (shouldUseWorker) {
+				// Cancel any ongoing calculation to prevent multiple simultaneous calculations
+				if (this.calculationAbortController) {
+					this.calculationAbortController.abort();
+				}
+				this.calculationAbortController = new AbortController();
+				
 				this.isCalculating = true;
 				this.calculationError = null;
 
@@ -791,15 +817,18 @@ export default {
 					const configHash = this.generateWorkerConfigHash(config);
 					const cachedResult = this.workerResultCache.get(configHash);
 					if (cachedResult) {
-						// Use cached worker result
-						console.log(`[Cache] Using cached worker result (${this.data.length} records, cache size: ${this.workerResultCache.size})`);
-						
+					// Use cached worker result
 					// CRITICAL: Ensure pivotResult is initialized before setting value
 					// Check existence first to avoid "Cannot read property 'value' of null" errors
-					if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
-						this.pivotResult = shallowRef(null);
+					// typeof null === 'object' in JavaScript, so we need explicit null check before using 'in' operator
+					// Store in local variable to avoid reactivity issues
+					let pivotResultRef = this.pivotResult;
+					if (!pivotResultRef || pivotResultRef === null || typeof pivotResultRef !== 'object' || !('value' in pivotResultRef)) {
+						pivotResultRef = shallowRef(null);
+						this.pivotResult = pivotResultRef;
 					}
-					this.pivotResult.value = cachedResult;
+					// Use local reference to set value - avoids accessing this.pivotResult which might have changed
+					pivotResultRef.value = cachedResult;
 						this.isCalculating = false;
 						return;
 					}
@@ -808,7 +837,7 @@ export default {
 					const result = await pivotWorkerManager.calculatePivot(config);
 					const calcEndTime = performance.now();
 					
-					console.log(`[Performance] Worker Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
+					console.log(`[Performance] Pivot Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
 					
 					// Apply Top-N filtering after pivot calculation
 					const topNThreshold = 50; // Default threshold
@@ -938,13 +967,24 @@ export default {
 					
 					// CRITICAL: Ensure pivotResult is initialized before setting value
 					// Check existence first to avoid "Cannot read property 'value' of null" errors
-					if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
-						this.pivotResult = shallowRef(null);
+					// typeof null === 'object' in JavaScript, so we need explicit null check before using 'in' operator
+					// Store in local variable to avoid reactivity issues
+					let pivotResultRef = this.pivotResult;
+					if (!pivotResultRef || pivotResultRef === null || typeof pivotResultRef !== 'object' || !('value' in pivotResultRef)) {
+						pivotResultRef = shallowRef(null);
+						this.pivotResult = pivotResultRef;
 					}
-					this.pivotResult.value = result;
+					// Use local reference to set value - avoids accessing this.pivotResult which might have changed
+					pivotResultRef.value = result;
 				} catch (error) {
-					console.error('Worker calculation error, falling back to sync:', error);
 					this.calculationError = error;
+					// Ensure pivotResult is initialized before fallback
+					// Store in local variable to avoid reactivity issues
+					let pivotResultRef = this.pivotResult;
+					if (!pivotResultRef || pivotResultRef === null || typeof pivotResultRef !== 'object' || !('value' in pivotResultRef)) {
+						pivotResultRef = shallowRef(null);
+						this.pivotResult = pivotResultRef;
+					}
 					// Fallback to synchronous calculation
 					this.performPivotCalculationSync();
 				} finally {
@@ -965,7 +1005,9 @@ export default {
 			// CRITICAL: Ensure pivotResult is always a valid shallowRef object
 			// Store in local variable immediately to avoid reactivity issues
 			// This must be done synchronously before any async operations
-			if (!this.pivotResult || typeof this.pivotResult !== 'object' || !('value' in this.pivotResult)) {
+			// typeof null === 'object' in JavaScript, so we need explicit null check before using 'in' operator
+			const pivotResultCheck = this.pivotResult;
+			if (!pivotResultCheck || pivotResultCheck === null || typeof pivotResultCheck !== 'object' || !('value' in pivotResultCheck)) {
 				this.pivotResult = shallowRef(null);
 			}
 			// Store reference in local variable to avoid multiple property accesses
@@ -994,7 +1036,7 @@ export default {
 				});
 				const calcEndTime = performance.now();
 				
-				console.log(`[Performance] Sync Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
+				console.log(`[Performance] Pivot Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
 
 				// Convert to same format as worker result
 				const rowKeys = pivotData.getRowKeys();
@@ -1036,27 +1078,6 @@ export default {
 							const value = aggregator.value();
 							const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
 							result.rowTotals[flatRowKey][aggName] = { value, formatted };
-							// Debug: log for List Unique Values and Average to verify stored value
-							const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
-							if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
-								console.log(`[Row Total Storage] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
-								console.log(`[Row Total Storage] Value:`, value, `Type:`, typeof value);
-								console.log(`[Row Total Storage] Formatted:`, formatted, `Type:`, typeof formatted);
-								if (aggregator.uniq) {
-									console.log(`[Row Total Storage] Aggregator.uniq:`, aggregator.uniq, `Length:`, aggregator.uniq.length);
-								}
-							}
-							if (cleanAggName === 'average' || cleanAggName.includes('average')) {
-								console.log(`[Row Total Storage - Average] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
-								console.log(`[Row Total Storage - Average] Value:`, value, `Type:`, typeof value);
-								console.log(`[Row Total Storage - Average] Formatted:`, formatted, `Type:`, typeof formatted);
-								if (aggregator.n !== undefined) {
-									console.log(`[Row Total Storage - Average] Aggregator.n (count):`, aggregator.n);
-								}
-								if (aggregator.m !== undefined) {
-									console.log(`[Row Total Storage - Average] Aggregator.m (mean):`, aggregator.m);
-								}
-							}
 						} else {
 							result.rowTotals[flatRowKey][aggName] = { value: null, formatted: '' };
 						}
@@ -1085,7 +1106,8 @@ export default {
 			// CRITICAL: Re-check pivotResult after async operations
 			// Use the local reference stored at the start of the function
 			// If pivotResultRef is still valid, use it; otherwise re-initialize
-			if (!pivotResultRef || typeof pivotResultRef !== 'object' || !('value' in pivotResultRef)) {
+			// Must check for null explicitly before using 'in' operator (null throws error with 'in')
+			if (!pivotResultRef || pivotResultRef === null || typeof pivotResultRef !== 'object' || !('value' in pivotResultRef)) {
 				// Re-initialize if the local reference is invalid
 				pivotResultRef = shallowRef(null);
 				this.pivotResult = pivotResultRef;
@@ -1095,12 +1117,12 @@ export default {
 			// which might have been reset by Vue's reactivity system
 			pivotResultRef.value = result;
 		} catch (error) {
-			console.error('Synchronous pivot calculation error:', error);
 			this.calculationError = error;
 			// Use the local reference if available, otherwise check this.pivotResult
-			if (pivotResultRef && typeof pivotResultRef === 'object' && 'value' in pivotResultRef) {
+			// Must check for null explicitly before using 'in' operator (null throws error with 'in')
+			if (pivotResultRef && pivotResultRef !== null && typeof pivotResultRef === 'object' && 'value' in pivotResultRef) {
 				pivotResultRef.value = null;
-			} else if (this.pivotResult && typeof this.pivotResult === 'object' && 'value' in this.pivotResult) {
+			} else if (this.pivotResult && this.pivotResult !== null && typeof this.pivotResult === 'object' && 'value' in this.pivotResult) {
 				this.pivotResult.value = null;
 			}
 		} finally {
@@ -1500,7 +1522,6 @@ export default {
 	},
 	render() {
 		if (this.data.length < 1) return;
-		console.log(this.propsData, 'this props data ++++++++++');
 		const rendererName = this.propsData.rendererName || this.rendererName;
 		const aggregatorName =
 			this.selectedAggregators[0] ||

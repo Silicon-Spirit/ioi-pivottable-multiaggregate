@@ -98,6 +98,7 @@ function makeRenderer(opts = {}) {
 				cachedPivotData: null,
 				cachedInputHash: null,
 				calculationStartTime: null,
+				dataLimitWarning: null, // Warning message when data is limited
 				calculationTime: 0,
 				renderingStartTime: null
 			};
@@ -158,12 +159,15 @@ function makeRenderer(opts = {}) {
 				// Check if we have a pre-calculated result with Top-N already applied
 				let rowKeys, colKeys, aggregatorList, pivotData;
 				
-				if (this.usePreCalculatedResult && this.pivotResult && 
-					this.pivotResult.rowKeys && this.pivotResult.colKeys && this.pivotResult.tree) {
+				// Handle pivotResult as a ref - it might be unwrapped by Vue or still be a ref
+				const pivotResultValue = this.pivotResult?.value !== undefined ? this.pivotResult.value : this.pivotResult;
+				
+				if (this.usePreCalculatedResult && pivotResultValue && 
+					pivotResultValue.rowKeys && pivotResultValue.colKeys && pivotResultValue.tree) {
 					// Use pre-calculated result (Top-N already applied)
-					rowKeys = this.pivotResult.rowKeys;
-					colKeys = this.pivotResult.colKeys;
-					aggregatorList = this.pivotResult.aggregatorNames || [];
+					rowKeys = pivotResultValue.rowKeys;
+					colKeys = pivotResultValue.colKeys;
+					aggregatorList = pivotResultValue.aggregatorNames || [];
 					pivotData = null; // We'll use pivotResult.tree instead
 				} else {
 					// Create new PivotEngine instance (for small datasets or when worker not used)
@@ -205,11 +209,11 @@ function makeRenderer(opts = {}) {
 				let hasData = false;
 				if (pivotData) {
 					hasData = pivotData.tree && Object.keys(pivotData.tree).length > 0;
-				} else if (this.pivotResult) {
+				} else if (pivotResultValue) {
 					// Check if tree exists and has data, or if we have rowKeys/colKeys
-					hasData = (this.pivotResult.tree && Object.keys(this.pivotResult.tree).length > 0) ||
-						(this.pivotResult.rowKeys && this.pivotResult.rowKeys.length > 0) ||
-						(this.pivotResult.colKeys && this.pivotResult.colKeys.length > 0);
+					hasData = (pivotResultValue.tree && Object.keys(pivotResultValue.tree).length > 0) ||
+						(pivotResultValue.rowKeys && pivotResultValue.rowKeys.length > 0) ||
+						(pivotResultValue.colKeys && pivotResultValue.colKeys.length > 0);
 				}
 				
 				// If no primaryAggregator but we have aggregatorList, try to get one
@@ -267,16 +271,16 @@ function makeRenderer(opts = {}) {
 								v = aggregator && typeof aggregator.value === "function"
 									? aggregator.value()
 									: null;
-							} else if (this.pivotResult && this.pivotResult.tree) {
+							} else if (pivotResultValue && pivotResultValue.tree) {
 								// Use pre-calculated result (Top-N already applied)
 								const flatRowKey = r.join(String.fromCharCode(0));
 								const flatColKey = c.join(String.fromCharCode(0));
 								// Try effectiveAggregator first, then try all aggregators in aggregatorList
-								let cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[effectiveAggregator];
+								let cellData = pivotResultValue.tree[flatRowKey]?.[flatColKey]?.[effectiveAggregator];
 								if (!cellData && aggregatorList.length > 0) {
 									// Try each aggregator until we find one with data
 									for (const aggName of aggregatorList) {
-										cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName];
+										cellData = pivotResultValue.tree[flatRowKey]?.[flatColKey]?.[aggName];
 										if (cellData) break;
 									}
 								}
@@ -546,23 +550,23 @@ function makeRenderer(opts = {}) {
 					// Start rendering time measurement
 					this.renderingStartTime = performance.now();
 					
+					// Handle pivotResult as a ref - it might be unwrapped by Vue or still be a ref
+					// Define at function scope so it can be used throughout the render function
+					const pivotResultValue = this.pivotResult?.value !== undefined ? this.pivotResult.value : this.pivotResult;
+					
 					// Check if we should use pre-calculated result from Web Worker
 					let pivotData = null;
 					let usePreCalculated = false;
 					
 					// Only check for pre-calculated result if we're actually using worker workflow
 					if (this.usePreCalculatedResult) {
+						
 						// Check if we have a valid result (either from worker or sync fallback)
-						if (this.pivotResult && typeof this.pivotResult === 'object' && 
-						    this.pivotResult.rowKeys && this.pivotResult.colKeys && this.pivotResult.tree) {
+						if (pivotResultValue && typeof pivotResultValue === 'object' && 
+						    pivotResultValue.rowKeys && pivotResultValue.colKeys && pivotResultValue.tree) {
 							// Use pre-calculated result - could be from worker or sync fallback
 							usePreCalculated = true;
 							this.calculationTime = 0; // Calculation already done
-							if (this.calculationError) {
-								console.warn('Using sync fallback result after worker error');
-							} else {
-								console.log(`[Performance] Using pre-calculated result from Web Worker`);
-							}
 						} else if (this.isCalculating) {
 							// Worker is still calculating - show loading state
 							return h('div', {
@@ -570,10 +574,8 @@ function makeRenderer(opts = {}) {
 								style: { padding: '20px', textAlign: 'center' }
 							}, 'Calculating...');
 						} else {
-							// Calculation finished but no result - fall through to create PivotData synchronously
-							// This handles cases where worker failed and sync fallback also failed
-							// or when calculation is still in progress but isCalculating flag hasn't been set yet
-							console.warn('No pre-calculated result available, will create PivotData synchronously');
+							// Only warn if we have data and calculation should have completed
+							// Don't warn on initial render before calculation starts
 						}
 					}
 					// If usePreCalculatedResult is false, we skip the above and go straight to creating PivotData
@@ -596,7 +598,9 @@ function makeRenderer(opts = {}) {
 						
 						// Check if we have a pre-calculated result from PivottableUi's async calculation
 						// If yes, use it to avoid synchronous recalculation
-						if (this.pivotResult && this.pivotResult.rowKeys && this.pivotResult.colKeys) {
+						// Handle pivotResult as a ref - it might be unwrapped by Vue or still be a ref
+						const pivotResultValue = this.pivotResult?.value !== undefined ? this.pivotResult.value : this.pivotResult;
+						if (pivotResultValue && pivotResultValue.rowKeys && pivotResultValue.colKeys) {
 							// We have a pre-calculated result - use it
 							// Create PivotData but it will be used with the pre-calculated result
 							// The actual calculation was already done asynchronously
@@ -608,7 +612,6 @@ function makeRenderer(opts = {}) {
 								this.cachedInputHash = inputHash;
 								this.calculationTime = 0; // Already calculated asynchronously
 							} catch (error) {
-								console.error('Error creating PivotData from pre-calculated result:', error);
 								return null;
 							}
 						}
@@ -630,7 +633,6 @@ function makeRenderer(opts = {}) {
 						if (this.cachedPivotData && this.cachedInputHash === inputHash) {
 							pivotData = this.cachedPivotData;
 							this.calculationTime = 0; // No calculation needed
-							console.log(`[Performance] Using cached PivotData (no recalculation needed)`);
 						} else {
 							// For small datasets, check if we have a pre-calculated result from PivottableUi
 							// If isCalculating is true, calculation is in progress - show loading
@@ -646,7 +648,6 @@ function makeRenderer(opts = {}) {
 									this.cachedInputHash = inputHash;
 									this.calculationTime = 0; // Already calculated
 								} catch (error) {
-									console.error('Error creating PivotData from cached result:', error);
 									return null;
 								}
 							} else {
@@ -655,26 +656,20 @@ function makeRenderer(opts = {}) {
 								// But fallback to synchronous creation if needed
 								this.calculationStartTime = performance.now();
 								try {
-									// Validate props before creating PivotData
-									if (!this.$props || !this.$props.data) {
-										console.warn('Invalid props for PivotData creation');
-										return null;
-									}
-									
-									pivotData = new PivotEngine(this.$props);
-									const calculationEndTime = performance.now();
-									this.calculationTime = calculationEndTime - this.calculationStartTime;
-									
-									const dataSize = Array.isArray(this.data) ? this.data.length : 0;
-									console.log(`\n[Performance] Pivot Calculation: ${this.calculationTime.toFixed(2)}ms for ${dataSize} records`);
-									console.log(`[Performance] Calculation Rate: ${dataSize > 0 ? (dataSize / this.calculationTime * 1000).toFixed(0) : 0} records/sec`);
-									
-									this.cachedPivotData = pivotData;
-									this.cachedInputHash = inputHash;
-								} catch (error) {
-									console.error('Error creating PivotData in render:', error);
+								// Validate props before creating PivotData
+								if (!this.$props || !this.$props.data) {
 									return null;
 								}
+									
+								pivotData = new PivotEngine(this.$props);
+								const calculationEndTime = performance.now();
+								this.calculationTime = calculationEndTime - this.calculationStartTime;
+								
+								this.cachedPivotData = pivotData;
+									this.cachedInputHash = inputHash;
+							} catch (error) {
+								return null;
+							}
 							}
 						}
 					}
@@ -695,9 +690,9 @@ function makeRenderer(opts = {}) {
 					};
 
 					let aggregatorList = [];
-					if (usePreCalculated && this.pivotResult) {
+					if (usePreCalculated && pivotResultValue) {
 						// Use pre-calculated aggregator names from worker
-						aggregatorList = this.pivotResult.aggregatorNames || [];
+						aggregatorList = pivotResultValue.aggregatorNames || [];
 					} else if (pivotData && typeof pivotData.getAggregatorNames === "function") {
 						const names = pivotData.getAggregatorNames();
 						if (Array.isArray(names)) {
@@ -732,13 +727,13 @@ function makeRenderer(opts = {}) {
 					let baseRowKeys = [];
 					let baseColKeys = [];
 
-					if (usePreCalculated && this.pivotResult && 
-					    Array.isArray(this.pivotResult.rowKeys) && Array.isArray(this.pivotResult.colKeys)) {
+					if (usePreCalculated && pivotResultValue && 
+					    Array.isArray(pivotResultValue.rowKeys) && Array.isArray(pivotResultValue.colKeys)) {
 						rowAttrs = this.rows || [];
 						colAttrs = this.cols || [];
 						// Ensure all elements are arrays
-						baseRowKeys = this.pivotResult.rowKeys.filter(key => Array.isArray(key)) || [];
-						baseColKeys = this.pivotResult.colKeys.filter(key => Array.isArray(key)) || [];
+						baseRowKeys = pivotResultValue.rowKeys.filter(key => Array.isArray(key)) || [];
+						baseColKeys = pivotResultValue.colKeys.filter(key => Array.isArray(key)) || [];
 					} else if (pivotData) {
 						try {
 							rowAttrs = pivotData.props?.rows || [];
@@ -758,9 +753,8 @@ function makeRenderer(opts = {}) {
 							} else {
 								baseColKeys = [];
 							}
-						} catch (error) {
-							console.error('Error getting keys from pivotData:', error);
-							// Fallback to props
+					} catch (error) {
+						// Fallback to props
 							rowAttrs = this.rows || [];
 							colAttrs = this.cols || [];
 							baseRowKeys = [];
@@ -791,6 +785,17 @@ function makeRenderer(opts = {}) {
 					const filteredRowKeys = validBaseRowKeys;
 					const filteredColKeys = validBaseColKeys;
 					
+					// CRITICAL: Limit rows and columns to prevent browser crashes
+					// Maximum limits to prevent "Out of Memory" errors
+					const MAX_ROWS = 10000; // Maximum rows to render (even with virtualization)
+					const MAX_COLS = 500; // Maximum columns to render
+					const MAX_TOTAL_CELLS = 500000; // Maximum total cells (rows × cols × aggregators)
+					
+					// Store original counts for warning message
+					const originalRowCount = filteredRowKeys.length;
+					const originalColCount = filteredColKeys.length;
+					const originalCellCount = originalRowCount * originalColCount * aggregatorCount;
+					
 					// Check if all data is filtered out - hide table if:
 					// 1. Both rowKeys and colKeys are empty and tree is empty, OR
 					// 2. There are row attributes defined but all rowKeys are filtered out, OR
@@ -800,7 +805,7 @@ function makeRenderer(opts = {}) {
 					const allRowsFiltered = hasRowAttrs && filteredRowKeys.length === 0;
 					const allColsFiltered = hasColAttrs && filteredColKeys.length === 0;
 					// Check tree emptiness - use pivotResult.tree if available, otherwise pivotData.tree
-					const tree = usePreCalculated && this.pivotResult ? this.pivotResult.tree : (pivotData ? pivotData.tree : {});
+					const tree = usePreCalculated && pivotResultValue ? pivotResultValue.tree : (pivotData ? pivotData.tree : {});
 					const bothEmpty = filteredRowKeys.length === 0 && filteredColKeys.length === 0 && Object.keys(tree).length === 0;
 					
 					const isAllDataFiltered = bothEmpty || allRowsFiltered || allColsFiltered;
@@ -809,8 +814,32 @@ function makeRenderer(opts = {}) {
 						return null; // Don't display the table when all values are filtered
 					}
 					
-					const rowKeys = filteredRowKeys.length ? filteredRowKeys : [[]];
-					const colKeys = filteredColKeys.length ? filteredColKeys : [[]];
+					let rowKeys = filteredRowKeys.length ? filteredRowKeys : [[]];
+					let colKeys = filteredColKeys.length ? filteredColKeys : [[]];
+					
+					// Limit rows if exceeds maximum
+					if (rowKeys.length > MAX_ROWS) {
+						rowKeys = rowKeys.slice(0, MAX_ROWS);
+					}
+					
+					// Limit columns if exceeds maximum
+					if (colKeys.length > MAX_COLS) {
+						colKeys = colKeys.slice(0, MAX_COLS);
+					}
+					
+					// Check total cell count and limit if necessary
+					const totalCells = rowKeys.length * colKeys.length * aggregatorCount;
+					if (totalCells > MAX_TOTAL_CELLS) {
+						// Calculate how many rows/cols we can show
+						const maxCellsPerRow = Math.floor(MAX_TOTAL_CELLS / (rowKeys.length * aggregatorCount));
+						const maxRowsForCells = Math.floor(MAX_TOTAL_CELLS / (colKeys.length * aggregatorCount));
+						
+						if (colKeys.length > maxCellsPerRow) {
+							colKeys = colKeys.slice(0, maxCellsPerRow);
+						} else if (rowKeys.length > maxRowsForCells) {
+							rowKeys = rowKeys.slice(0, maxRowsForCells);
+						}
+					}
 
 					let effectiveColKeys =
 						aggregatorCount > 1
@@ -898,7 +927,7 @@ function makeRenderer(opts = {}) {
 										colKeys.forEach((colKey) => {
 											const flatRowKey = rowKey.join(String.fromCharCode(0));
 											const flatColKey = colKey.join(String.fromCharCode(0));
-											const val = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
+											const val = pivotResultValue?.tree?.[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
 											// Only include non-zero valid numbers for color scale calculation
 											if (val !== null && val !== undefined && typeof val === 'number' && !isNaN(val) && isFinite(val) && val !== 0) {
 												allValues.push(val);
@@ -937,10 +966,10 @@ function makeRenderer(opts = {}) {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
 										const rowValues = colKeys.map((colKey) => {
 											const flatColKey = colKey.join(String.fromCharCode(0));
-											return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
+											return pivotResultValue?.tree?.[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
 										}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
 										// Include row total for this row in the color scale calculation
-										const rowTotalValue = this.pivotResult.rowTotals[flatRowKey]?.[aggName]?.value ?? null;
+										const rowTotalValue = pivotResultValue?.rowTotals?.[flatRowKey]?.[aggName]?.value ?? null;
 										if (rowTotalValue !== null && rowTotalValue !== undefined && typeof rowTotalValue === 'number' && !isNaN(rowTotalValue) && isFinite(rowTotalValue) && rowTotalValue !== 0) {
 											rowValues.push(rowTotalValue);
 										}
@@ -981,10 +1010,10 @@ function makeRenderer(opts = {}) {
 										const flatColKey = colKey.join(String.fromCharCode(0));
 										const colValues = rowKeys.map((rowKey) => {
 											const flatRowKey = rowKey.join(String.fromCharCode(0));
-											return this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
+											return pivotResultValue?.tree?.[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
 										}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
 										// Include column total for this column in the color scale calculation
-										const colTotalValue = this.pivotResult.colTotals[flatColKey]?.[aggName]?.value ?? null;
+										const colTotalValue = pivotResultValue?.colTotals?.[flatColKey]?.[aggName]?.value ?? null;
 										if (colTotalValue !== null && colTotalValue !== undefined && typeof colTotalValue === 'number' && !isNaN(colTotalValue) && isFinite(colTotalValue) && colTotalValue !== 0) {
 											colValues.push(colTotalValue);
 										}
@@ -1512,6 +1541,7 @@ function makeRenderer(opts = {}) {
 					}
 
 					// When there are no vertical header fields, skip data rows (only show Totals row)
+					// bodyRows are already limited because rowKeys were limited above
 					const bodyRows = rowAttrs.length === 0 
 						? []
 						: rowKeys.map((rowKey, rowIndex) => {
@@ -1549,11 +1579,11 @@ function makeRenderer(opts = {}) {
 								let formatted = '';
 								let isEmpty = true;
 								
-								if (usePreCalculated && this.pivotResult) {
+								if (usePreCalculated && pivotResultValue) {
 									// Use pre-calculated data from worker
 									const flatRowKey = rowKey.join(String.fromCharCode(0));
 									const flatColKey = colKey.join(String.fromCharCode(0));
-									const cellData = this.pivotResult.tree[flatRowKey]?.[flatColKey]?.[aggregatorName];
+									const cellData = pivotResultValue.tree?.[flatRowKey]?.[flatColKey]?.[aggregatorName];
 									if (cellData) {
 										value = cellData.value;
 										// Round numeric values to 2 decimal places
@@ -1627,28 +1657,9 @@ function makeRenderer(opts = {}) {
 										const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
 										const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
 										
-										// Debug: log what's available in pivotResult
-										if (isStringAggregator) {
-											console.log(`[Row Total Retrieval] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
-											console.log(`[Row Total Retrieval] pivotResult.rowTotals exists:`, !!this.pivotResult.rowTotals);
-											console.log(`[Row Total Retrieval] pivotResult.rowTotals[flatRowKey] exists:`, !!this.pivotResult.rowTotals?.[flatRowKey]);
-											console.log(`[Row Total Retrieval] Available aggregators in rowTotals:`, this.pivotResult.rowTotals?.[flatRowKey] ? Object.keys(this.pivotResult.rowTotals[flatRowKey]) : 'N/A');
-										}
-										
 										const rowTotalData = this.pivotResult.rowTotals?.[flatRowKey]?.[aggName];
 										if (rowTotalData) {
 											totalValue = rowTotalData.value;
-											// Debug: log for List Unique Values and Average to verify retrieved value
-											if (isStringAggregator) {
-												console.log(`[Row Total Retrieval] Retrieved value:`, totalValue, `Type:`, typeof totalValue);
-												console.log(`[Row Total Retrieval] Retrieved formatted:`, rowTotalData.formatted, `Type:`, typeof rowTotalData.formatted);
-												console.log(`[Row Total Retrieval] Full rowTotalData:`, rowTotalData);
-											}
-											if (cleanAggName === 'average' || cleanAggName.includes('average')) {
-												console.log(`[Row Total Retrieval - Average] Row key:`, rowKey, `flatRowKey:`, flatRowKey, `Aggregator:`, aggName);
-												console.log(`[Row Total Retrieval - Average] Retrieved value:`, totalValue, `Type:`, typeof totalValue);
-												console.log(`[Row Total Retrieval - Average] Retrieved formatted:`, rowTotalData.formatted, `Type:`, typeof rowTotalData.formatted);
-											}
 											
 											if (!isStringAggregator && typeof totalValue === 'number') {
 												totalValue = roundNumericValue(totalValue);
@@ -1730,36 +1741,14 @@ function makeRenderer(opts = {}) {
 										const rowTotalAggregator = pivotData.getAggregator(rowKey, [], aggName);
 										if (rowTotalAggregator && typeof rowTotalAggregator.value === "function") {
 											totalValue = rowTotalAggregator.value();
-											// Debug: log for List Unique Values and Average
-											const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
-											const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
-											if (isStringAggregator) {
-												console.log(`[Row Total PivotData] Row key:`, rowKey, `Aggregator:`, aggName);
-												console.log(`[Row Total PivotData] totalValue from aggregator.value():`, totalValue, `Type:`, typeof totalValue);
-												if (rowTotalAggregator.uniq) {
-													console.log(`[Row Total PivotData] Aggregator.uniq:`, rowTotalAggregator.uniq, `Length:`, rowTotalAggregator.uniq.length);
-												}
-											}
-											if (cleanAggName === 'average' || cleanAggName.includes('average')) {
-												console.log(`[Row Total PivotData - Average] Row key:`, rowKey, `Aggregator:`, aggName);
-												console.log(`[Row Total PivotData - Average] totalValue from aggregator.value():`, totalValue, `Type:`, typeof totalValue);
-												if (rowTotalAggregator.n !== undefined) {
-													console.log(`[Row Total PivotData - Average] Aggregator.n (count):`, rowTotalAggregator.n);
-												}
-												if (rowTotalAggregator.m !== undefined) {
-													console.log(`[Row Total PivotData - Average] Aggregator.m (mean):`, rowTotalAggregator.m);
-												}
-											}
-											
 											// For "List Unique Values", the value is already a comma-separated string
 											// For numeric aggregations, round to 2 decimal places
+											const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+											const isStringAggregator = cleanAggName.includes('list') && cleanAggName.includes('unique');
 											if (!isStringAggregator && typeof totalValue === 'number') {
 												totalValue = roundNumericValue(totalValue);
 											}
 											totalDisplay = formatCellDisplay(rowTotalAggregator, totalValue);
-											if (isStringAggregator) {
-												console.log(`[Row Total PivotData] totalDisplay after formatCellDisplay:`, totalDisplay);
-											}
 										} else {
 											totalDisplay = { formatted: '', isEmpty: true };
 										}
@@ -2208,42 +2197,79 @@ function makeRenderer(opts = {}) {
 						const dataSize = Array.isArray(this.data) ? this.data.length : 0;
 						
 						console.log(`[Performance] Rendering: ${renderingTime.toFixed(2)}ms`);
-						if (this.calculationTime > 0) {
-							console.log(`[Performance] Calculation: ${this.calculationTime.toFixed(2)}ms`);
-							console.log(`[Performance] Total Time (Calculation + Rendering): ${(this.calculationTime + renderingTime).toFixed(2)}ms`);
-						}
-						
-						// Log summary
-						const rowCount = rowKeys.length;
-						const colCount = colKeys.length;
-						const cellCount = rowCount * colCount * aggregatorCount;
-						console.log(`[Performance] Summary: ${dataSize} records → ${rowCount} rows × ${colCount} cols × ${aggregatorCount} aggregators = ${cellCount} cells`);
-						console.log(`==========================================\n`);
 					}
 
 					// Check if virtualization should be enabled
-					const shouldVirtualize = this.enableVirtualization && 
+					// For large datasets, automatically enable virtualization even if threshold not met
+					// Calculate total cell count to determine if we need virtualization
+					// Note: aggregatorCount is already declared above, so we reuse it
+					const dataSize = Array.isArray(this.data) ? this.data.length : 0;
+					const rowCount = bodyRows.length;
+					const colCount = effectiveColKeys ? effectiveColKeys.length : 0;
+					// aggregatorCount is already declared at line 742, reuse it
+					const estimatedCellCount = rowCount * colCount * aggregatorCount;
+					
+					// Enable virtualization if:
+					// 1. Explicitly enabled AND threshold met, OR
+					// 2. Estimated cell count exceeds 5,000 (lowered threshold for better performance)
+					const shouldVirtualize = (this.enableVirtualization && 
 						bodyRows.length > this.virtualizationThreshold &&
-						rowAttrs.length > 0; // Only virtualize if there are data rows
+						rowAttrs.length > 0) || // Normal threshold check
+						(estimatedCellCount > 5000 && rowAttrs.length > 0); // Auto-enable for large cell counts (lowered from 10000)
 
+					// Helper function to create warning element
+					const createWarningElement = () => {
+						if (!this.dataLimitWarning) return null;
+						return h('div', {
+							style: {
+								padding: '10px',
+								backgroundColor: '#fff3cd',
+								border: '1px solid #ffc107',
+								borderRadius: '4px',
+								marginBottom: '10px',
+								color: '#856404',
+								fontSize: '14px'
+							}
+						}, `⚠️ ${this.dataLimitWarning}. Consider reducing the number of fields in rows/columns.`);
+					};
+					
 					if (shouldVirtualize) {
-						return this.renderVirtualizedTable(
+						const virtualizedTable = this.renderVirtualizedTable(
 							headerRows, 
 							bodyRows, 
 							rowKeys, 
 							rowAttrs, 
 							headerColAttrs
 						);
+						
+						const warningElement = createWarningElement();
+						if (warningElement) {
+							return h('div', [
+								warningElement,
+								virtualizedTable
+							]);
+						}
+						return virtualizedTable;
 					}
 
 					// Normal rendering for small tables
-					return h(
+					const tableElement = h(
 						"table",
 						{
 							class: ["pvtTable"],
 						},
 						[h("thead", headerRows), h("tbody", null, bodyRows)]
 					);
+					
+					// Return table with warning if data was limited
+					const warningElement = createWarningElement();
+					if (warningElement) {
+						return h('div', [
+							warningElement,
+							tableElement
+						]);
+					}
+					return tableElement;
 				}
 				
 				// Handle chart renderers
@@ -2281,7 +2307,6 @@ function makeRenderer(opts = {}) {
 					]);
 				}
 			} catch (error) {
-				console.error('Error in TableRenderer render:', error);
 				// Return a simple error message or empty div
 				return h('div', {
 					class: 'pvtError',
@@ -2711,8 +2736,6 @@ const XLSXExportRenderer = {
 
 			format_data.push(totalRow);
 		}
-
-		console.log(format_data);
 
 		return h("div", {
 			class: "d-flex justify-content-center align-items-center",

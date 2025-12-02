@@ -30,11 +30,20 @@ export default {
 		const borderRedrawKey = ref(0);
 
 		// Create virtualizer for scroll tracking
+		// Reduce overscan for large datasets to improve performance
+		const overscanCount = computed(() => {
+			const rowCount = props.bodyRows.length;
+			// Use smaller overscan for very large datasets
+			if (rowCount > 10000) return 5;
+			if (rowCount > 5000) return 7;
+			return 10; // Default overscan
+		});
+		
 		const rowVirtualizer = useVirtualizer({
 			count: computed(() => props.bodyRows.length),
 			getScrollElement: () => parentRef.value,
 			estimateSize: () => ROW_HEIGHT,
-			overscan: 10,
+			overscan: overscanCount,
 		});
 
 		// Function to force border redraw

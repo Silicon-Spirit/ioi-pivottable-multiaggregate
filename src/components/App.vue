@@ -22,9 +22,11 @@
 				<button type="button" @click="triggerJsonInput">Upload JSON File</button>
 			</label>
 			<button @click="generateLargedatasets">Generate Sample Data(150000)</button>
-			<span class="info">Current dataset size: {{ (currentData?.length || 0) * 3 / 2 }} records</span>
+			<span class="info">Current dataset size: {{ (currentData?.length || 0) }} records</span>
 			<span class="info">Column Header Cell Count: {{ horizontalHeaderCount.toLocaleString() }}</span>
-			<span v-if="uploading" class="upload-status">Processing file...</span>
+			<span v-if="uploading" class="upload-status">
+				Processing file... <span v-if="uploadProgress > 0">{{ uploadProgress }}%</span>
+			</span>
 		</div>
 		<div v-if="fieldAnalysis && fieldAnalysis.fieldStats" class="field-stats-container">
 			<div class="field-stats-header">
@@ -72,7 +74,7 @@
 			:rowTotal="true"
 			:colTotal="true"
 			:enableVirtualization="true"
-			:virtualizationThreshold="100"
+			:virtualizationThreshold="50"
 			:virtualizationMaxHeight="600"
 		/>
 	</div>
@@ -83,6 +85,7 @@ import { ref, shallowRef, watch, computed, nextTick, onMounted, onUnmounted } fr
 import PivottableUi from "./PivottableUi.js";
 import { countUniqueValuesPerField } from "../utils/fieldAnalyzer.js";
 import * as XLSX from "xlsx";
+import { excelWorkerManager } from "../utils/excelWorkerManager.js";
 
 export default {
 	name: "App",
@@ -97,6 +100,7 @@ export default {
 		const vals = shallowRef([]);
 		const aggregatorNames = shallowRef(['Count', 'Sum']);
 		const uploading = ref(false);
+		const uploadProgress = ref(0);
 		const horizontalHeaderCount = ref(0);
 		const showFieldStats = ref(true);
 		const showControlPanel = ref(true);
@@ -134,140 +138,143 @@ export default {
 			}
 
 			uploading.value = true;
+			uploadProgress.value = 0;
 			
 			try {
 				// Read file as ArrayBuffer
 				const arrayBuffer = await file.arrayBuffer();
 				
-				// Parse Excel file with options to handle large files better
-				const workbook = XLSX.read(arrayBuffer, { 
-					type: 'array',
-					cellDates: true,
-					cellNF: false,
-					cellStyles: false,
-					sheetStubs: false
-				});
-				
-				// Get first sheet
-				const firstSheetName = workbook.SheetNames[0];
-				const worksheet = workbook.Sheets[firstSheetName];
-				
-				// Convert to JSON
-				const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-					raw: false, // Convert dates and numbers to strings for consistency
-					defval: null, // Default value for empty cells
-					dateNF: 'yyyy-mm-dd' // Date format
-				});
-
-				// Limit to 500,000 rows to prevent browser crashes
-				const maxRows = 500000;
-				if (jsonData.length > maxRows) {
-					const proceed = confirm(`The file contains ${jsonData.length.toLocaleString()} rows. Processing more than ${maxRows.toLocaleString()} rows may cause the browser to freeze. Do you want to process only the first ${maxRows.toLocaleString()} rows?`);
-					if (!proceed) {
-						event.target.value = '';
-						uploading.value = false;
-						return;
-					}
-					jsonData.splice(maxRows);
-				}
-
-				// Process data in chunks to prevent browser freeze
-				const chunkSize = 1000; // Process 1000 rows at a time
-				const processedData = [];
-				
-				// Process first chunk immediately
-				for (let i = 0; i < Math.min(chunkSize, jsonData.length); i++) {
-					const row = jsonData[i];
-					const processedRow = {};
-					for (const key in row) {
-						let value = row[key];
-						
-						// Convert empty strings to null
-						if (value === '' || value === 'null') {
-							value = null;
+				// Try to use Web Worker for processing (faster, non-blocking)
+				if (excelWorkerManager.isAvailable()) {
+					// Process in worker with progress updates
+					const result = await excelWorkerManager.processExcel(arrayBuffer, {
+						maxRows: 500000,
+						onProgress: (progress) => {
+							uploadProgress.value = progress.percentage;
 						}
-						// Try to convert numeric strings to numbers
-						else if (typeof value === 'string' && value.trim() !== '') {
-							const numValue = parseFloat(value);
-							if (!isNaN(numValue) && isFinite(numValue) && value.trim() === String(numValue)) {
-								value = numValue;
+					});
+
+					// Check if row limit was reached
+					if (result.rowCount >= 500000) {
+						const proceed = confirm(`The file contains more than 500,000 rows. Only the first 500,000 rows were processed. Continue?`);
+						if (!proceed) {
+							event.target.value = '';
+							uploading.value = false;
+							uploadProgress.value = 0;
+							return;
+						}
+					}
+
+					// CRITICAL: Reset header fields to empty before setting new data
+					rows.value = [];
+					cols.value = [];
+					
+					currentData.value = result.data;
+					
+					// Reset file input
+					event.target.value = '';
+					
+					// Automatically analyze fields after loading Excel data
+					nextTick(() => {
+						setTimeout(() => {
+							analyzeFields();
+						}, 100);
+					});
+				} else {
+					// Fallback to synchronous processing if worker is not available
+					// Parse Excel file with maximum performance options
+					const workbook = XLSX.read(arrayBuffer, { 
+						type: 'array',
+						cellDates: false, // Disable date parsing for speed
+						cellNF: false,
+						cellStyles: false,
+						sheetStubs: false,
+						bookSheets: false,
+						bookProps: false,
+						bookFiles: false,
+						bookVBA: false,
+						WTF: false,
+						dense: false // Use sparse mode (faster)
+					});
+					
+					// Get first sheet
+					const firstSheetName = workbook.SheetNames[0];
+					const worksheet = workbook.Sheets[firstSheetName];
+					
+					// Convert to JSON with raw values for maximum speed
+					let jsonData = XLSX.utils.sheet_to_json(worksheet, {
+						raw: true, // Keep raw values (much faster!)
+						defval: null,
+						blankrows: false // Skip blank rows
+					});
+
+					// Limit to 500,000 rows
+					const maxRows = 500000;
+					if (jsonData.length > maxRows) {
+						const proceed = confirm(`The file contains ${jsonData.length.toLocaleString()} rows. Processing more than ${maxRows.toLocaleString()} rows may cause the browser to freeze. Do you want to process only the first ${maxRows.toLocaleString()} rows?`);
+						if (!proceed) {
+							event.target.value = '';
+							uploading.value = false;
+							uploadProgress.value = 0;
+							return;
+						}
+						jsonData = jsonData.slice(0, maxRows);
+					}
+
+					// CRITICAL OPTIMIZATION: Modify rows in-place instead of creating new objects
+					// This eliminates object creation overhead which is the main bottleneck
+					const totalRows = jsonData.length;
+					
+					// Process all rows with in-place modification
+					// With raw: true, numbers are already numbers
+					for (let i = 0; i < totalRows; i++) {
+						const row = jsonData[i];
+						
+						// Fast in-place modification - only convert empty strings to null
+						const keys = Object.keys(row);
+						for (let j = 0, len = keys.length; j < len; j++) {
+							const key = keys[j];
+							const value = row[key];
+							// Only convert empty strings - everything else stays as-is
+							if (value === '' || value === 'null') {
+								row[key] = null;
 							}
 						}
 						
-						processedRow[key] = value;
+						// Update progress every 10k rows to reduce overhead
+						if ((i + 1) % 10000 === 0 || i === totalRows - 1) {
+							uploadProgress.value = Math.round(((i + 1) / totalRows) * 100);
+							// Yield to browser occasionally
+							if (i % 50000 === 0 && i > 0) {
+								await new Promise(resolve => setTimeout(resolve, 0));
+							}
+						}
 					}
-					processedData.push(processedRow);
-				}
+					
+					// Use the modified jsonData directly - no need to copy
+					const processedData = jsonData;
 
-				// Process remaining chunks asynchronously
-				if (jsonData.length > chunkSize) {
-					await new Promise((resolve) => {
-						let currentIndex = chunkSize;
-						
-						const processChunk = () => {
-							const endIndex = Math.min(currentIndex + chunkSize, jsonData.length);
-							
-							for (let i = currentIndex; i < endIndex; i++) {
-								const row = jsonData[i];
-								const processedRow = {};
-								for (const key in row) {
-									let value = row[key];
-									
-									// Convert empty strings to null
-									if (value === '' || value === 'null') {
-										value = null;
-									}
-									// Try to convert numeric strings to numbers
-									else if (typeof value === 'string' && value.trim() !== '') {
-										const numValue = parseFloat(value);
-										if (!isNaN(numValue) && isFinite(numValue) && value.trim() === String(numValue)) {
-											value = numValue;
-										}
-									}
-									
-									processedRow[key] = value;
-								}
-								processedData.push(processedRow);
-							}
-							
-							currentIndex = endIndex;
-							
-							if (currentIndex < jsonData.length) {
-								// Yield to browser, then continue
-								setTimeout(processChunk, 0);
-							} else {
-								resolve();
-							}
-						};
-						
-						processChunk();
+					// CRITICAL: Reset header fields to empty before setting new data
+					rows.value = [];
+					cols.value = [];
+					
+					currentData.value = processedData;
+					
+					// Reset file input
+					event.target.value = '';
+					
+					// Automatically analyze fields after loading Excel data
+					nextTick(() => {
+						setTimeout(() => {
+							analyzeFields();
+						}, 100);
 					});
 				}
-
-				// CRITICAL: Reset header fields to empty before setting new data
-				// This ensures previous file's header configuration doesn't persist
-				rows.value = [];
-				cols.value = [];
-				
-				currentData.value = processedData;
-				console.log(`✅ Loaded ${processedData.length} records from Excel file: ${file.name}`);
-				
-				// Reset file input
-				event.target.value = '';
-				
-				// Automatically analyze fields after loading Excel data
-				// Analyze unique value counts for all fields
-				// Use nextTick to ensure data is fully set, then analyze
-				nextTick(() => {
-					setTimeout(() => {
-						analyzeFields();
-					}, 100);
-				});
 			} catch (error) {
-				console.error('Error processing Excel file:', error);
 				alert('Failed to process Excel file. Please make sure it is a valid Excel file (.xlsx, .xls) or CSV. Error: ' + error.message);
 			} finally {
 				uploading.value = false;
+				uploadProgress.value = 0;
 			}
 		};
 
@@ -396,7 +403,6 @@ export default {
 				cols.value = [];
 				
 				currentData.value = processedData;
-				console.log(`✅ Loaded ${processedData.length} records from JSON file: ${file.name}`);
 				
 				// Reset file input
 				event.target.value = '';
@@ -410,7 +416,6 @@ export default {
 					}, 100);
 				});
 			} catch (error) {
-				console.error('Error processing JSON file:', error);
 				alert('Failed to process JSON file. Please make sure it is a valid JSON file containing an array of objects. Error: ' + error.message);
 			} finally {
 				uploading.value = false;
@@ -547,8 +552,6 @@ export default {
 
 				// Use the calculateDataCellsCount function
 				const dataCellsCount = calculateDataCellsCount(cols.value);
-
-				console.log('Max <th> count in rendered table:', maxThCount);
 				
 				// Don't show alert here - validateColumnDrop handles alerts when user tries to add fields
 				// This function just updates the count display
@@ -754,7 +757,6 @@ export default {
 			cols.value = [];
 			
 			currentData.value = data;
-			console.log(`✅ Generated ${data.length * 3 / 2} records`);
 			
 			// Automatically analyze fields after generating sample data
 			// Analyze unique value counts for all fields
@@ -768,23 +770,12 @@ export default {
 		// This function is called automatically after loading Excel, JSON, or generating sample data
 		const analyzeFields = () => {
 			if (!currentData.value || currentData.value.length === 0) {
-				console.warn('No data available for analysis');
 				return;
 			}
-
-			console.log('\n========== Starting Field Analysis ==========');
-			console.log(`Analyzing ${currentData.value.length} records...`);
 
 			// Count unique values for each field in the dataset
 			const fieldStats = countUniqueValuesPerField(currentData.value);
 			fieldAnalysis.value = { fieldStats };
-
-			console.log('\n========== Field Analysis Results ==========');
-			console.log('Unique value counts for each field:');
-			for (const field in fieldStats) {
-				console.log(`  ${field}: ${fieldStats[field]} unique values`);
-			}
-			console.log('===========================================\n');
 
 			// Don't automatically set row and column headers
 			// Let the user configure them manually
@@ -809,12 +800,6 @@ export default {
 				vals.value = [allFields[0]];
 				aggregatorNames.value = ['Count'];
 			}
-
-			console.log('Pivot Table Configuration:');
-			console.log('Rows:', rows.value);
-			console.log('Cols:', cols.value);
-			console.log('Values:', vals.value);
-			console.log('Aggregators:', aggregatorNames.value);
 
 			// Update horizontal header count after configuring columns
 			// Use nextTick with a delay to ensure table is fully rendered
@@ -909,6 +894,7 @@ export default {
 			vals,
 			aggregatorNames,
 			uploading,
+			uploadProgress,
 			horizontalHeaderCount,
 			showFieldStats,
 			showControlPanel,
