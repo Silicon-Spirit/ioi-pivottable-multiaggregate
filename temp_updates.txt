@@ -1,5 +1,0 @@
-Order buttons: width 10px, height 10px, margin-left 2px, font-size 7px
-Select dropdowns: height 18px, padding 0px 4px, font-size 9px, border-radius 3px, margin 1px
-Renderer dropdown: padding 0px 6px
-Plus/Minus buttons: width 12px, height 12px, border-radius 6px, font-size 8px
-Cancel/OK buttons: padding 1px 3px, font-size 8px, border-radius 3px, margin 1px 1px 2px 0px

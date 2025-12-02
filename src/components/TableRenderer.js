@@ -2471,11 +2471,21 @@ const XLSXExportRenderer = {
 			
 			headerColAttrs.forEach((attr, attrIndex) => {
 				const headerRow = [];
+				const isLastHeaderRow = attrIndex === headerColAttrs.length - 1;
 				
-				// Add empty cells for row attributes
-				rowAttrs.forEach(() => {
-					headerRow.push('');
-				});
+				// Add row attribute labels in the last header row (matching table renderer behavior)
+				// For earlier rows, add empty cells to maintain alignment
+				if (isLastHeaderRow && rowAttrs.length > 0) {
+					// Add actual row attribute labels in the last header row
+					rowAttrs.forEach((rowAttr) => {
+						headerRow.push(rowAttr);
+					});
+				} else {
+					// Add empty cells for row attributes in earlier header rows
+					rowAttrs.forEach(() => {
+						headerRow.push('');
+					});
+				}
 
 				// Add column attribute header
 				if (attrIndex < colAttrs.length) {
