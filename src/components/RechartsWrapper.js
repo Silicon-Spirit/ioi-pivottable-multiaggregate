@@ -644,6 +644,16 @@ export default defineComponent({
 					yAxisConfig.max = centerValue + defaultRange;
 				}
 
+				// Check if "Others" is in the labels and ensure it's visible initially
+				const othersIndex = filteredLabels.indexOf('Others');
+				let initialEnd = Math.min(100, filteredLabels.length > 20 ? (20 / filteredLabels.length) * 100 : 100);
+				// If "Others" exists and is beyond the initial view, adjust to include it
+				if (othersIndex !== -1 && othersIndex >= 20) {
+					// Include "Others" by showing up to its position + a bit more for context
+					const othersEndPercent = ((othersIndex + 1) / filteredLabels.length) * 100;
+					initialEnd = Math.min(100, othersEndPercent + 5); // Add 5% buffer
+				}
+
 				return {
 					// Explicitly hide title when chart has data
 					title: {
@@ -730,9 +740,9 @@ export default defineComponent({
 							type: 'slider',
 							show: true,
 							xAxisIndex: [0],
-							// Show first 20 labels by default for better initial view
+							// Show first 20 labels by default, but ensure "Others" is visible if present
 							start: 0,
-							end: Math.min(100, filteredLabels.length > 20 ? (20 / filteredLabels.length) * 100 : 100),
+							end: initialEnd,
 							bottom: '5px', // Position dataZoom very close to labels
 							height: 20,
 							handleIcon: 'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23.1h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
@@ -774,7 +784,7 @@ export default defineComponent({
 							type: 'inside',
 							xAxisIndex: [0],
 							start: 0,
-							end: Math.min(100, filteredLabels.length > 20 ? (20 / filteredLabels.length) * 100 : 100),
+							end: initialEnd,
 							zoomOnMouseWheel: true,
 							moveOnMouseMove: true,
 							moveOnMouseWheel: false
