@@ -2,7 +2,7 @@
 node_modules/# Keep package-lock.json for consistency
 
 # Build output
-dist/
+# dist/
 *.local
 
 # Development files (optional - you may want to keep index.html)
