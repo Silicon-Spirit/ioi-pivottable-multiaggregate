@@ -6,7 +6,7 @@
 import PivottableUi from "../components/PivottableUi.js";
 import Pivottable from "../components/Pivottable.js";
 import TableRenderer, { makeRenderer } from "../components/TableRenderer.js";
-import { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs, PivotData } from "../utils/utils.js";
+import { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs } from "../utils/utils.js";
 
 // Plugin for Vue 3
 const VuePivottablePlugin = {
@@ -31,7 +31,6 @@ export {
 	numberFormat,
 	getSort,
 	sortAs,
-	PivotData,
 };
 
 // Export plugin as default for convenience
