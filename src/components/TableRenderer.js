@@ -8,15 +8,16 @@ import { pivotWorkerManager } from "../utils/pivotWorkerManager.js";
 import { optimizeChartDataWithTopN } from "../utils/chartOptimization.js";
 
 function redColorScaleGenerator(values) {
-	// Filter to only include valid numeric values, excluding zeros
-	// This ensures the color scale is based on non-zero values only
+	// Filter to only include valid non-zero numeric values for color scale calculation
+	// Exclude zeros so the color scale is based on actual data values
+	// This ensures better color distribution across regular cells
 	const validValues = values.filter(v => 
 		v !== null && 
 		v !== undefined && 
 		typeof v === 'number' && 
 		!isNaN(v) && 
 		isFinite(v) &&
-		v !== 0  // Exclude zeros from color scale calculation
+		v !== 0  // Exclude zeros from min/max calculation for better color distribution
 	);
 	
 	// If no valid non-zero values, return a function that returns empty style
@@ -27,17 +28,18 @@ function redColorScaleGenerator(values) {
 	const min = Math.min.apply(Math, validValues);
 	const max = Math.max.apply(Math, validValues);
 	
-	// Handle case where all values are the same
+	// Handle case where all non-zero values are the same
 	if (min === max) {
-		// Return a function that applies a neutral color for all values
-	return (x) => {
+		// Return a function that applies a neutral color for all non-zero values
+		return (x) => {
 			// Convert to number if it's a string
 			const numValue = typeof x === 'string' ? parseFloat(x) : x;
 			// Only apply color if x is a valid non-zero number
 			if (numValue !== null && numValue !== undefined && typeof numValue === 'number' && !isNaN(numValue) && isFinite(numValue) && numValue !== 0) {
-				// Apply a mid-range red color when all values are the same
+				// Apply a mid-range red color when all non-zero values are the same
 				return { backgroundColor: `rgb(255, 128, 128)` };
 			}
+			// Zeros and invalid values get no color (white background)
 			return {};
 		};
 	}
@@ -47,11 +49,13 @@ function redColorScaleGenerator(values) {
 		const numValue = typeof x === 'string' ? parseFloat(x) : x;
 		
 		// Only apply color if x is a valid non-zero number
+		// Zeros get no color (white background) for better visual distinction
 		if (numValue === null || numValue === undefined || typeof numValue !== 'number' || isNaN(numValue) || !isFinite(numValue) || numValue === 0) {
 			return {};
 		}
 		
 		// Normalize value to 0-1 range based on non-zero min/max
+		// This ensures better color distribution - smallest non-zero gets lightest red, largest gets darkest red
 		const normalized = (numValue - min) / (max - min);
 		// Clamp to [0, 1] to ensure valid RGB values
 		const clamped = Math.max(0, Math.min(1, normalized));
@@ -881,7 +885,7 @@ function makeRenderer(opts = {}) {
 					// Apply heatmap colors if in heatmap mode (works with single or multiple aggregators)
 					// For multiple aggregators, create color scales for EACH aggregator separately
 					if (currentMode && ['heat-map-full', 'heat-map-col', 'heat-map-row'].includes(currentMode)) {
-					const colorScaleGenerator = this.tableColorScaleGenerator;
+						const colorScaleGenerator = this.tableColorScaleGenerator;
 						
 						// Create color scales for each aggregator
 						const aggregatorColorScales = {};
@@ -890,11 +894,12 @@ function makeRenderer(opts = {}) {
 						const aggregatorGrandTotalColors = {};
 						
 						aggregatorList.forEach((aggName) => {
-							if (usePreCalculated && this.pivotResult) {
+							if (usePreCalculated && pivotResultValue) {
 								// Use pre-calculated data from worker for heatmap
+								// CRITICAL: Use pivotResultValue consistently (unwrapped ref)
 								const rowTotalValues = colKeys.map((colKey) => {
 									const flatColKey = colKey.join(String.fromCharCode(0));
-									return this.pivotResult.colTotals[flatColKey]?.[aggName]?.value ?? null;
+									return pivotResultValue?.colTotals?.[flatColKey]?.[aggName]?.value ?? null;
 								}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
 								if (rowTotalValues.length > 0) {
 									aggregatorRowTotalColors[aggName] = colorScaleGenerator(rowTotalValues);
@@ -904,7 +909,7 @@ function makeRenderer(opts = {}) {
 								
 								const colTotalValues = rowKeys.map((rowKey) => {
 									const flatRowKey = rowKey.join(String.fromCharCode(0));
-									return this.pivotResult.rowTotals[flatRowKey]?.[aggName]?.value ?? null;
+									return pivotResultValue?.rowTotals?.[flatRowKey]?.[aggName]?.value ?? null;
 								}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
 								if (colTotalValues.length > 0) {
 									aggregatorColTotalColors[aggName] = colorScaleGenerator(colTotalValues);
@@ -913,7 +918,7 @@ function makeRenderer(opts = {}) {
 								}
 								
 								// Grand totals for this aggregator
-								const grandTotalValue = this.pivotResult.allTotal?.[aggName]?.value ?? null;
+								const grandTotalValue = pivotResultValue?.allTotal?.[aggName]?.value ?? null;
 								if (grandTotalValue !== null && grandTotalValue !== undefined && typeof grandTotalValue === 'number' && !isNaN(grandTotalValue) && isFinite(grandTotalValue) && grandTotalValue !== 0) {
 									aggregatorGrandTotalColors[aggName] = colorScaleGenerator([grandTotalValue]);
 								} else {
@@ -921,37 +926,39 @@ function makeRenderer(opts = {}) {
 								}
 
 								if (currentMode === "heat-map-full") {
+									// Full heatmap: normalize across ALL non-zero values (cells + totals)
+									// Exclude zeros from scale calculation for better color distribution
 									const allValues = [];
-									// Include all regular cell values
+									// Include all regular cell values (non-zero only for better color distribution)
 									rowKeys.forEach((rowKey) =>
 										colKeys.forEach((colKey) => {
 											const flatRowKey = rowKey.join(String.fromCharCode(0));
 											const flatColKey = colKey.join(String.fromCharCode(0));
 											const val = pivotResultValue?.tree?.[flatRowKey]?.[flatColKey]?.[aggName]?.value ?? null;
-											// Only include non-zero valid numbers for color scale calculation
+											// Include only non-zero valid numbers for color scale calculation
 											if (val !== null && val !== undefined && typeof val === 'number' && !isNaN(val) && isFinite(val) && val !== 0) {
 												allValues.push(val);
 											}
 										})
 									);
-									// Include row totals (column totals)
+									// Include row totals (column totals - bottom row)
 									colKeys.forEach((colKey) => {
 										const flatColKey = colKey.join(String.fromCharCode(0));
-										const val = this.pivotResult.colTotals[flatColKey]?.[aggName]?.value ?? null;
+										const val = pivotResultValue?.colTotals?.[flatColKey]?.[aggName]?.value ?? null;
 										if (val !== null && val !== undefined && typeof val === 'number' && !isNaN(val) && isFinite(val) && val !== 0) {
 											allValues.push(val);
 										}
 									});
-									// Include column totals (row totals)
+									// Include column totals (row totals - right column)
 									rowKeys.forEach((rowKey) => {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
-										const val = this.pivotResult.rowTotals[flatRowKey]?.[aggName]?.value ?? null;
+										const val = pivotResultValue?.rowTotals?.[flatRowKey]?.[aggName]?.value ?? null;
 										if (val !== null && val !== undefined && typeof val === 'number' && !isNaN(val) && isFinite(val) && val !== 0) {
 											allValues.push(val);
 										}
 									});
 									// Include grand total
-									const grandTotalValue = this.pivotResult.allTotal?.[aggName]?.value ?? null;
+									const grandTotalValue = pivotResultValue?.allTotal?.[aggName]?.value ?? null;
 									if (grandTotalValue !== null && grandTotalValue !== undefined && typeof grandTotalValue === 'number' && !isNaN(grandTotalValue) && isFinite(grandTotalValue) && grandTotalValue !== 0) {
 										allValues.push(grandTotalValue);
 									}
@@ -961,7 +968,8 @@ function makeRenderer(opts = {}) {
 										aggregatorColorScales[aggName] = () => ({});
 									}
 								} else if (currentMode === "heat-map-row") {
-						const rowColorScales = {};
+									// Row heatmap: normalize each row independently (excluding zeros)
+									const rowColorScales = {};
 									rowKeys.forEach((rowKey) => {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
 										const rowValues = colKeys.map((colKey) => {
@@ -979,14 +987,13 @@ function makeRenderer(opts = {}) {
 											rowColorScales[flatRowKey] = () => ({});
 										}
 									});
-									// Create a scale for column totals (bottommost row) based on ALL column totals
-									// This ensures the maximum column total gets the darkest red
+									// Create a scale for column totals (bottommost row) based on ALL column totals (non-zero)
 									const allColTotalValues = colKeys.map((colKey) => {
 										const flatColKey = colKey.join(String.fromCharCode(0));
-										return this.pivotResult.colTotals[flatColKey]?.[aggName]?.value ?? null;
+										return pivotResultValue?.colTotals?.[flatColKey]?.[aggName]?.value ?? null;
 									}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
-									// Include grand total in the column totals scale so it gets the correct color
-									const grandTotalValue = this.pivotResult.allTotal?.[aggName]?.value ?? null;
+									// Include grand total in the column totals scale
+									const grandTotalValue = pivotResultValue?.allTotal?.[aggName]?.value ?? null;
 									if (grandTotalValue !== null && grandTotalValue !== undefined && typeof grandTotalValue === 'number' && !isNaN(grandTotalValue) && isFinite(grandTotalValue) && grandTotalValue !== 0) {
 										allColTotalValues.push(grandTotalValue);
 									}
@@ -1005,7 +1012,8 @@ function makeRenderer(opts = {}) {
 										return scale && typeof scale === 'function' ? scale(numValue) : {};
 									};
 								} else if (currentMode === "heat-map-col") {
-						const colColorScales = {};
+									// Column heatmap: normalize each column independently (excluding zeros)
+									const colColorScales = {};
 									colKeys.forEach((colKey) => {
 										const flatColKey = colKey.join(String.fromCharCode(0));
 										const colValues = rowKeys.map((rowKey) => {
@@ -1023,14 +1031,13 @@ function makeRenderer(opts = {}) {
 											colColorScales[flatColKey] = () => ({});
 										}
 									});
-									// Create a scale for row totals (grand totals column) based on all row totals
-									// This ensures the maximum row total (e.g., 2,402) gets the darkest red
+									// Create a scale for row totals (grand totals column) based on all row totals (non-zero)
 									const rowTotalValues = rowKeys.map((rowKey) => {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
-										return this.pivotResult.rowTotals[flatRowKey]?.[aggName]?.value ?? null;
+										return pivotResultValue?.rowTotals?.[flatRowKey]?.[aggName]?.value ?? null;
 									}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
-									// Include grand total in the row totals scale so it gets the correct color
-									const grandTotalValue = this.pivotResult.allTotal?.[aggName]?.value ?? null;
+									// Include grand total in the row totals scale
+									const grandTotalValue = pivotResultValue?.allTotal?.[aggName]?.value ?? null;
 									if (grandTotalValue !== null && grandTotalValue !== undefined && typeof grandTotalValue === 'number' && !isNaN(grandTotalValue) && isFinite(grandTotalValue) && grandTotalValue !== 0) {
 										rowTotalValues.push(grandTotalValue);
 									}
@@ -1059,7 +1066,7 @@ function makeRenderer(opts = {}) {
 								const rowTotalValues = colKeys.map((colKey) => {
 									const agg = pivotData.getAggregator([], colKey, aggName);
 									return agg && typeof agg.value === 'function' ? agg.value() : null;
-								}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
+								}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v));
 								if (rowTotalValues.length > 0) {
 									aggregatorRowTotalColors[aggName] = colorScaleGenerator(rowTotalValues);
 								} else {
@@ -1069,7 +1076,7 @@ function makeRenderer(opts = {}) {
 								const colTotalValues = rowKeys.map((rowKey) => {
 									const agg = pivotData.getAggregator(rowKey, [], aggName);
 									return agg && typeof agg.value === 'function' ? agg.value() : null;
-								}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
+								}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v));
 								if (colTotalValues.length > 0) {
 									aggregatorColTotalColors[aggName] = colorScaleGenerator(colTotalValues);
 								} else {
@@ -1080,7 +1087,7 @@ function makeRenderer(opts = {}) {
 								const grandTotalAggregator = pivotData.getAggregator([], [], aggName);
 								if (grandTotalAggregator && typeof grandTotalAggregator.value === 'function') {
 									const grandTotalValue = grandTotalAggregator.value();
-									if (grandTotalValue !== null && grandTotalValue !== undefined && typeof grandTotalValue === 'number' && !isNaN(grandTotalValue) && isFinite(grandTotalValue) && grandTotalValue !== 0) {
+									if (grandTotalValue !== null && grandTotalValue !== undefined && typeof grandTotalValue === 'number' && !isNaN(grandTotalValue) && isFinite(grandTotalValue)) {
 										aggregatorGrandTotalColors[aggName] = colorScaleGenerator([grandTotalValue]);
 									} else {
 										aggregatorGrandTotalColors[aggName] = () => ({});
@@ -1090,19 +1097,21 @@ function makeRenderer(opts = {}) {
 								}
 
 								if (currentMode === "heat-map-full") {
+									// Full heatmap: normalize across ALL non-zero values (cells + totals)
+									// Exclude zeros from scale calculation for better color distribution
 									const allValues = [];
-									// Include all regular cell values
+									// Include all regular cell values (non-zero only for better color distribution)
 									rowKeys.forEach((rowKey) =>
 										colKeys.forEach((colKey) => {
 											const agg = pivotData.getAggregator(rowKey, colKey, aggName);
 											const val = agg && typeof agg.value === 'function' ? agg.value() : null;
-											// Only include non-zero valid numbers for color scale calculation
+											// Include only non-zero valid numbers for color scale calculation
 											if (val !== null && val !== undefined && typeof val === 'number' && !isNaN(val) && isFinite(val) && val !== 0) {
 												allValues.push(val);
 											}
 										})
 									);
-									// Include row totals (column totals)
+									// Include row totals (column totals - bottom row)
 									colKeys.forEach((colKey) => {
 										const agg = pivotData.getAggregator([], colKey, aggName);
 										const val = agg && typeof agg.value === 'function' ? agg.value() : null;
@@ -1110,7 +1119,7 @@ function makeRenderer(opts = {}) {
 											allValues.push(val);
 										}
 									});
-									// Include column totals (row totals)
+									// Include column totals (row totals - right column)
 									rowKeys.forEach((rowKey) => {
 										const agg = pivotData.getAggregator(rowKey, [], aggName);
 										const val = agg && typeof agg.value === 'function' ? agg.value() : null;
@@ -1132,6 +1141,7 @@ function makeRenderer(opts = {}) {
 										aggregatorColorScales[aggName] = () => ({});
 									}
 								} else if (currentMode === "heat-map-row") {
+									// Row heatmap: normalize each row independently (excluding zeros)
 									const rowColorScales = {};
 									rowKeys.forEach((rowKey) => {
 										const flatRowKey = rowKey.join(String.fromCharCode(0));
@@ -1153,13 +1163,12 @@ function makeRenderer(opts = {}) {
 											rowColorScales[flatRowKey] = () => ({});
 										}
 									});
-									// Create a scale for column totals (bottommost row) based on ALL column totals
-									// This ensures the maximum column total gets the darkest red
+									// Create a scale for column totals (bottommost row) based on ALL column totals (non-zero)
 									const allColTotalValues = colKeys.map((colKey) => {
 										const colTotalAggregator = pivotData.getAggregator([], colKey, aggName);
 										return colTotalAggregator && typeof colTotalAggregator.value === 'function' ? colTotalAggregator.value() : null;
 									}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
-									// Include grand total in the column totals scale so it gets the correct color
+									// Include grand total in the column totals scale
 									const grandTotalAggregator = pivotData.getAggregator([], [], aggName);
 									if (grandTotalAggregator && typeof grandTotalAggregator.value === 'function') {
 										const grandTotalValue = grandTotalAggregator.value();
@@ -1182,6 +1191,7 @@ function makeRenderer(opts = {}) {
 										return scale && typeof scale === 'function' ? scale(numValue) : {};
 									};
 								} else if (currentMode === "heat-map-col") {
+									// Column heatmap: normalize each column independently (excluding zeros)
 									const colColorScales = {};
 									colKeys.forEach((colKey) => {
 										const flatColKey = colKey.join(String.fromCharCode(0));
@@ -1203,13 +1213,12 @@ function makeRenderer(opts = {}) {
 											colColorScales[flatColKey] = () => ({});
 										}
 									});
-									// Create a scale for row totals (grand totals column) based on all row totals
-									// This ensures the maximum row total (e.g., 2,402) gets the darkest red
+									// Create a scale for row totals (grand totals column) based on all row totals (non-zero)
 									const rowTotalValues = rowKeys.map((rowKey) => {
 										const rowTotalAggregator = pivotData.getAggregator(rowKey, [], aggName);
 										return rowTotalAggregator && typeof rowTotalAggregator.value === 'function' ? rowTotalAggregator.value() : null;
 									}).filter(v => v !== null && v !== undefined && typeof v === 'number' && !isNaN(v) && isFinite(v) && v !== 0);
-									// Include grand total in the row totals scale so it gets the correct color
+									// Include grand total in the row totals scale
 									const grandTotalAggregator = pivotData.getAggregator([], [], aggName);
 									if (grandTotalAggregator && typeof grandTotalAggregator.value === 'function') {
 										const grandTotalValue = grandTotalAggregator.value();
@@ -2471,11 +2480,21 @@ const XLSXExportRenderer = {
 			
 			headerColAttrs.forEach((attr, attrIndex) => {
 				const headerRow = [];
+				const isLastHeaderRow = attrIndex === headerColAttrs.length - 1;
 				
-				// Add empty cells for row attributes
-				rowAttrs.forEach(() => {
-					headerRow.push('');
-				});
+				// Add row attribute labels in the last header row (matching table renderer behavior)
+				// For earlier rows, add empty cells to maintain alignment
+				if (isLastHeaderRow && rowAttrs.length > 0) {
+					// Add actual row attribute labels in the last header row
+					rowAttrs.forEach((rowAttr) => {
+						headerRow.push(rowAttr);
+					});
+				} else {
+					// Add empty cells for row attributes in earlier header rows
+					rowAttrs.forEach(() => {
+						headerRow.push('');
+					});
+				}
 
 				// Add column attribute header
 				if (attrIndex < colAttrs.length) {
