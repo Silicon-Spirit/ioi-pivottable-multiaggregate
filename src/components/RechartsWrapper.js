@@ -1022,7 +1022,7 @@ export default defineComponent({
 							end: Math.max(5, Math.min(100, initialEnd)), // Ensure at least 5% is visible
 							bottom: '10px', // Position dataZoom with adequate gap from bottom
 							height: 20,
-							showDataShadow: false, // Disable data shadow labels to avoid textStyle deprecation warning
+							showDataShadow: false, // Disable data shadow to avoid label textStyle warnings
 							handleIcon: 'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23.1h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
 							handleSize: '80%',
 							handleStyle: {
@@ -1032,6 +1032,7 @@ export default defineComponent({
 								shadowOffsetX: 2,
 								shadowOffsetY: 2
 							},
+							labelFormatter: '', // Disable label formatter to avoid textStyle warnings
 							borderColor: '#ccc',
 							// Better visual styling
 							fillerColor: 'rgba(122, 214, 255, 0.2)',
@@ -1071,7 +1072,7 @@ export default defineComponent({
 							end: 100,
 							right: '2%', // Positioned outside grid area with gap from chart data
 							width: 20,
-							showDataShadow: false, // Disable data shadow labels to avoid textStyle deprecation warning
+							showDataShadow: false, // Disable data shadow to avoid label textStyle warnings
 							handleIcon: 'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23.1h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
 							handleSize: '80%',
 							handleStyle: {
@@ -1081,6 +1082,7 @@ export default defineComponent({
 								shadowOffsetX: 2,
 								shadowOffsetY: 2
 							},
+							labelFormatter: '', // Disable label formatter to avoid textStyle warnings
 							borderColor: '#ccc',
 							// Better visual styling for Y-axis zoom
 							fillerColor: 'rgba(122, 214, 255, 0.2)',
