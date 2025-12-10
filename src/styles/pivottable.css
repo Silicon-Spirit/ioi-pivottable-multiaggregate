@@ -179,6 +179,8 @@ table.pvtTable tbody tr th {
 	font-size: 8pt;
 	padding: 5px;
 	vertical-align: middle;
+	position: relative;
+	z-index: 1;
 }
 
 table.pvtTable .pvtColLabel {
@@ -753,7 +755,7 @@ table.pvtTable tbody tr td {
 }
 
 .pvtFilterBox {
-	z-index: 1000 !important;
+	z-index: 10000 !important;
 	border: 1px solid #e0e0e0;
 	max-width: 400px;
 	min-width: 250px;
@@ -776,11 +778,26 @@ table.pvtTable tbody tr td {
 .pvtUnused,
 .pvtAxisContainer {
 	overflow: visible !important;
+	position: relative;
+	z-index: 1;
 }
 
 .pvtUnused li,
 .pvtAxisContainer li {
 	overflow: visible !important;
+	position: relative;
+	z-index: 1;
+}
+
+/* Ensure filter box appears above table headers */
+.pvtAttr {
+	position: relative !important;
+	z-index: 1;
+}
+
+.pvtAttr .pvtFilterBox {
+	z-index: 10000 !important;
+	position: absolute !important;
 }
 
 .pvtFilterBox input[type='text'] {
@@ -969,4 +986,19 @@ table.pvtTable tbody tr td {
 		transform: translateX(0);
 		opacity: 1;
 	}
+}
+
+/* Ensure all ECharts tooltips have maximum z-index to appear above all elements */
+div[class*="echarts-tooltip"],
+div[id*="echarts"] div[style*="position"],
+div[style*="position: absolute"][style*="pointer-events"],
+div[style*="position: fixed"][style*="pointer-events"],
+/* Target ECharts tooltip containers */
+div[class*="echarts"] > div[style*="position"],
+div[class*="echarts"] div[class*="tooltip"],
+/* More specific selectors for ECharts tooltip elements */
+body > div[style*="position"][style*="z-index"],
+body > div[style*="position: absolute"],
+body > div[style*="position: fixed"] {
+	z-index: 99999 !important;
 }

@@ -104,7 +104,8 @@ function makeRenderer(opts = {}) {
 				calculationStartTime: null,
 				dataLimitWarning: null, // Warning message when data is limited
 				calculationTime: 0,
-				renderingStartTime: null
+				renderingStartTime: null,
+				selectedChartAggregator: null // Track selected aggregation for chart display
 			};
 		},
 		methods: {
@@ -159,7 +160,7 @@ function makeRenderer(opts = {}) {
 					maxHeight: this.virtualizationMaxHeight,
 				});
 			},
-			getChartData() {
+			getChartData(selectedAggregator = null) {
 				// Check if we have a pre-calculated result with Top-N already applied
 				let rowKeys, colKeys, aggregatorList, pivotData;
 				
@@ -205,7 +206,15 @@ function makeRenderer(opts = {}) {
 					colKeys = pivotData.getColKeys();
 				}
 				
-				const primaryAggregator = aggregatorList[0];
+				// Initialize or validate selectedChartAggregator
+				if (aggregatorList.length > 0) {
+					if (!this.selectedChartAggregator || !aggregatorList.includes(this.selectedChartAggregator)) {
+						this.selectedChartAggregator = aggregatorList[0];
+					}
+				}
+				
+				// Use selected aggregator if provided, otherwise use the stored one, otherwise fall back to first
+				const primaryAggregator = selectedAggregator || this.selectedChartAggregator || aggregatorList[0];
 
 				// Check if we have data (either from pivotData or pivotResult)
 				// For pivotData, check if tree exists and has keys
@@ -230,10 +239,13 @@ function makeRenderer(opts = {}) {
 				const finalAggregator = primaryAggregator || aggregatorList[0] || this.aggregatorName || (Array.isArray(this.aggregatorNames) && this.aggregatorNames[0]) || 'Count';
 				
 				// When using pivotResult, ensure we use an aggregator name that exists in the tree
-				// If finalAggregator doesn't exist in aggregatorList, use the first one from aggregatorList
-				const effectiveAggregator = (this.usePreCalculatedResult && this.pivotResult && aggregatorList.length > 0 && !aggregatorList.includes(finalAggregator))
-					? aggregatorList[0]
-					: finalAggregator;
+				// Prioritize the selected aggregator (finalAggregator) if it exists in the list
+				// Only fall back to aggregatorList[0] if the selected one doesn't exist in the list
+				let effectiveAggregator = finalAggregator;
+				if (!aggregatorList.includes(effectiveAggregator) && aggregatorList.length > 0) {
+					// Selected aggregator not in list, use first available
+					effectiveAggregator = aggregatorList[0];
+				}
 				
 				if (hasData) {
 
@@ -2283,7 +2295,35 @@ function makeRenderer(opts = {}) {
 				
 				// Handle chart renderers
 				if (['bar-chart', 'line-chart', 'pie-chart', 'percentage-chart'].includes(currentMode)) {
-					const chartData = this.getChartData();
+					// Get list of available aggregators
+					let aggregatorList = [];
+					const pivotResultValue = this.pivotResult?.value !== undefined ? this.pivotResult.value : this.pivotResult;
+					
+					if (this.usePreCalculatedResult && pivotResultValue && pivotResultValue.aggregatorNames) {
+						aggregatorList = pivotResultValue.aggregatorNames || [];
+					} else {
+						// Get from props
+						if (Array.isArray(this.aggregatorNames) && this.aggregatorNames.length) {
+							aggregatorList = this.aggregatorNames.filter((name) => typeof name === "string" && name.length);
+						} else if (Array.isArray(this.aggregatorName)) {
+							aggregatorList = this.aggregatorName.filter((name) => typeof name === "string" && name.length);
+						} else if (typeof this.aggregatorName === "string" && this.aggregatorName) {
+							aggregatorList = [this.aggregatorName];
+						}
+					}
+					
+					// Initialize or validate selected aggregator
+					if (aggregatorList.length > 0) {
+						if (!this.selectedChartAggregator || !aggregatorList.includes(this.selectedChartAggregator)) {
+							this.selectedChartAggregator = aggregatorList[0];
+						}
+					}
+					
+					// Get chart data with selected aggregator
+					const currentAggregator = this.selectedChartAggregator || aggregatorList[0];
+					console.log('Rendering chart with aggregator:', currentAggregator);
+					const chartData = this.getChartData(currentAggregator);
+					console.log('Chart data labels count:', chartData?.labels?.length, 'datasets count:', chartData?.datasets?.length);
 					
 					// Map chart mode to Recharts type
 					let chartType = 'bar';
@@ -2300,20 +2340,91 @@ function makeRenderer(opts = {}) {
 						(chartType === 'line' || chartType === 'bar') &&
 						chartData && chartData.labels && chartData.labels.length > 500;
 
-				return h('div', {
-						style: {
-							width: '100%',
-							padding: '20px'
-						}
-					}, [
+					// Create aggregation selector if multiple aggregations exist
+					const chartElements = [];
+					
+					if (aggregatorList.length > 1) {
+						// Calculate dynamic width based on aggregation text length
+						const currentAggregator = this.selectedChartAggregator || aggregatorList[0];
+						// Find the longest aggregation name for dropdown width
+						const longestName = aggregatorList.reduce((longest, name) => 
+							name.length > longest.length ? name : longest, '');
+						// Estimate width: ~8px per character + padding (12px left + 12px right + ~20px for dropdown arrow)
+						const estimatedWidth = Math.max(
+							currentAggregator.length * 8 + 44, // Current selection width
+							longestName.length * 8 + 44 // Longest option width
+						);
+						// Set reasonable min/max bounds
+						const selectWidth = Math.max(120, Math.min(estimatedWidth, 400));
+						
+						chartElements.push(
+							h('div', {
+								style: {
+									marginBottom: '15px',
+									display: 'flex',
+									alignItems: 'center',
+									gap: '10px'
+								}
+							}, [
+								h('label', {
+									style: {
+										fontSize: '14px',
+										fontWeight: '500',
+										color: '#424242'
+									}
+								}, 'Aggregation:'),
+								h('select', {
+									value: currentAggregator,
+									onChange: (e) => {
+										const newValue = e.target.value;
+										console.log('Aggregation changed to:', newValue);
+										this.selectedChartAggregator = newValue;
+										// Force immediate re-render
+										this.$forceUpdate();
+									},
+									style: {
+										padding: '6px 12px',
+										border: '1px solid #e0e0e0',
+										borderRadius: '4px',
+										fontSize: '13px',
+										backgroundColor: '#fff',
+										color: '#424242',
+										cursor: 'pointer',
+										width: `${selectWidth}px`,
+										minWidth: '120px',
+										maxWidth: '400px'
+									}
+								}, aggregatorList.map(aggName => 
+									h('option', {
+										key: aggName,
+										value: aggName
+									}, aggName)
+								))
+							])
+						);
+					}
+
+					// Create a unique key that includes the aggregator to force re-render
+					const chartKey = `chart-${this.selectedChartAggregator || aggregatorList[0]}`;
+					console.log('Chart key:', chartKey);
+					
+					chartElements.push(
 						h(ChartWrapper, {
+							key: chartKey, // Force re-render when aggregator changes
 							data: chartData,
 							type: chartType,
 							colors: ['#7ad6ff', '#7a94ff', '#d7d0ff', '#ff7b92', '#ffad70', '#fff48d', '#7ef8b3', '#c1ff7a', '#d7b3ff', '#ff7bff', '#b1b1b1', '#8d8d8d'],
 							lineOptions: opts.lineOptions || {},
 							useWorkerOptimization: useWorkerForLTTB
 						})
-					]);
+					);
+
+				return h('div', {
+						style: {
+							width: '100%',
+							padding: '20px'
+						}
+					}, chartElements);
 				}
 			} catch (error) {
 				// Return a simple error message or empty div

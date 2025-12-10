@@ -1,4 +1,4 @@
-import { h, defineComponent, computed, ref, onMounted, onUnmounted, nextTick } from 'vue';
+import { h, defineComponent, computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { use } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
@@ -56,6 +56,54 @@ export default defineComponent({
 		}
 	},
 		setup(props) {
+		// Drill-down state: track navigation history for "Others" items
+		const drillDownHistory = ref([]); // Array of {data, label} objects representing each level
+		const currentChartData = ref(null); // Current chart data being displayed (only used for drill-down)
+		
+		// Watch for changes to props.data - always use props.data directly when not in drill-down
+		watch(() => props.data, (newData) => {
+			// Only update currentChartData if we're in drill-down mode
+			// Otherwise, always use props.data directly in chartOption
+			if (drillDownHistory.value.length > 0) {
+				// In drill-down mode, don't reset
+				return;
+			}
+			// Not in drill-down mode, clear currentChartData so we use props.data
+			currentChartData.value = null;
+		}, { immediate: true });
+		
+		// Function to drill down into "Others"
+		const drillDownIntoOthers = (othersData) => {
+			if (!othersData || !othersData.labels || othersData.labels.length === 0) return;
+			
+			// Save current state to history
+			drillDownHistory.value.push({
+				data: currentChartData.value,
+				label: 'Others'
+			});
+			
+			// Apply Top-N to the "Others" data if it's still large
+			const topNThreshold = 20;
+			let nextData = othersData;
+			if (othersData.labels.length > topNThreshold) {
+				// Import the function dynamically
+				import('../utils/chartOptimization.js').then(module => {
+					nextData = module.optimizeChartDataWithTopN(othersData, topNThreshold, 'sum', true);
+					currentChartData.value = nextData;
+				});
+			} else {
+				currentChartData.value = nextData;
+			}
+		};
+		
+		// Function to go back to previous level
+		const goBack = () => {
+			if (drillDownHistory.value.length > 0) {
+				const previous = drillDownHistory.value.pop();
+				currentChartData.value = previous.data;
+			}
+		};
+		
 		// Helper function to truncate long labels for display
 		const truncateLabel = (label, maxLength = 30) => {
 			if (!label || typeof label !== 'string') return label;
@@ -74,27 +122,21 @@ export default defineComponent({
 		// Helper function to format label for better readability
 		const formatLabelForDisplay = (label) => {
 			if (!label || typeof label !== 'string') return label;
-			// If label is very long, try to extract key parts
-			// For labels like "Ancien contrat-2022-05-12-2025-09-04 21:08:24.026246-2932.33-2423.41"
-			// Extract: "Ancien contrat" and date part
-			if (label.length > 40) {
-				const parts = label.split('-');
-				if (parts.length >= 2) {
-					// Take first part (category) and date if available
-					const category = parts[0];
-					const datePart = parts.length > 1 ? parts[1] : '';
-					if (datePart && datePart.match(/^\d{4}-\d{2}-\d{2}/)) {
-						return `${category}-${datePart}...`;
-					}
-				}
+			// Truncate labels longer than 25 characters for x-axis display
+			if (label.length > 25) {
+				return truncateLabel(label, 25);
 			}
-			return truncateLabel(label, 40);
+			return label;
 		};
 		
 		const chartOption = computed(() => {
+			// Always use props.data directly unless we're in drill-down mode
+			// This ensures the chart always shows the latest data immediately
+			const dataToUse = drillDownHistory.value.length > 0 ? (currentChartData.value || props.data) : props.data;
+			
 			// More lenient check - allow null values in labels/datasets
 			// Only show "No data available" if there's truly no data structure
-			if (!props.data) {
+			if (!dataToUse || !dataToUse.labels || !dataToUse.datasets) {
 				return {
 					title: {
 						text: 'No data available',
@@ -112,7 +154,7 @@ export default defineComponent({
 			// - Top-N is applied after pivot calculation (filters rowKeys/colKeys)
 			// - LTTB runs in Web Worker when useWorkerOptimization is true
 			// So we just use the data as-is here
-			const { labels = [], datasets = [] } = props.data || {};
+			const { labels = [], datasets = [] } = dataToUse || {};
 			
 			// Check if we have actual data after processing (will check per chart type)
 			// For now, just ensure we have the structure - null values are allowed
@@ -189,6 +231,24 @@ export default defineComponent({
 				const topNThreshold = 20;
 				if (pieData.length > topNThreshold) {
 					pieData = optimizePieDataWithTopN(pieData, topNThreshold, true);
+					// Store _othersChartData for drill-down if _othersData exists
+					if (pieData._othersData && pieData._othersData.length > 0) {
+						// Convert pie "Others" data to chart data format for drill-down
+						const othersChartData = {
+							labels: [...new Set(pieData._othersData.map(item => {
+								const parts = item.name.split(' - ');
+								return parts[0];
+							}))],
+							datasets: datasets.map(dataset => ({
+								name: dataset.name,
+								values: pieData._othersData
+									.filter(item => item.name.includes(` - ${dataset.name}`))
+									.map(item => item.value)
+							})),
+							_othersData: null // Will be set if this data also needs Top-N
+						};
+						pieData._othersChartData = othersChartData;
+					}
 				}
 
 				// Calculate legend width for vertical legend
@@ -211,6 +271,33 @@ export default defineComponent({
 					},
 					tooltip: {
 						trigger: 'item',
+						appendToBody: true, // Render tooltip in document body to escape container constraints
+						confine: false, // Allow tooltip to be positioned outside chart area
+						// Dynamic positioning to ensure all items are visible
+						position: function (point, params, dom, rect, size) {
+							const viewWidth = size.viewSize[0];
+							const viewHeight = size.viewSize[1];
+							const tooltipWidth = size.contentSize[0];
+							const tooltipHeight = size.contentSize[1];
+							
+							let x = point[0] + 10;
+							let y = point[1] + 10;
+							
+							if (x + tooltipWidth > viewWidth) {
+								x = point[0] - tooltipWidth - 10;
+							}
+							if (y + tooltipHeight > viewHeight) {
+								if (point[1] - tooltipHeight - 10 > 0) {
+									y = point[1] - tooltipHeight - 10;
+								} else {
+									y = 10;
+								}
+							}
+							if (y < 10) y = 10;
+							if (x < 10) x = 10;
+							
+							return [x, y];
+						},
 						// Enhanced tooltip with percentage and value
 						formatter: (params) => {
 							const total = pieData.reduce((sum, item) => sum + item.value, 0);
@@ -236,7 +323,7 @@ export default defineComponent({
 							color: '#333',
 							fontSize: 12
 						},
-						extraCssText: 'box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;'
+						extraCssText: 'box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px; z-index: 99999 !important;'
 					},
 					legend: {
 						orient: 'vertical',
@@ -274,16 +361,14 @@ export default defineComponent({
 						// Center the pie chart accounting for legend width - use percentage
 						center: [pieCenterX, '50%'],
 						data: pieData,
-						emphasis: {
-							itemStyle: {
-								shadowBlur: 15,
-								shadowOffsetX: 0,
-								shadowOffsetY: 0,
-								shadowColor: 'rgba(0, 0, 0, 0.3)'
-							},
-							// Scale up on hover
-							scale: true,
-							scaleSize: 5
+						// Add click handler for "Others" items
+						onClick: (params) => {
+							if (params && params.name && params.name.includes('Others')) {
+								// Check if pieData has _othersChartData
+								if (pieData._othersChartData) {
+									drillDownIntoOthers(pieData._othersChartData);
+								}
+							}
 						},
 						itemStyle: {
 							color: (params) => {
@@ -293,10 +378,31 @@ export default defineComponent({
 							borderWidth: 2
 						},
 						label: {
-							show: false // Hide all labels - only show tooltip on hover
+							show: false // Hide all labels - no text rendering on pie chart
 						},
 						labelLine: {
 							show: false // Hide label lines since labels are hidden
+						},
+						// Ensure no text is rendered on pie slices
+						avoidLabelOverlap: false,
+						stillShowZeroSum: false,
+						emphasis: {
+							itemStyle: {
+								shadowBlur: 15,
+								shadowOffsetX: 0,
+								shadowOffsetY: 0,
+								shadowColor: 'rgba(0, 0, 0, 0.3)'
+							},
+							// Scale up on hover
+							scale: true,
+							scaleSize: 5,
+							// Disable all text rendering even on hover/emphasis
+							label: {
+								show: false // Hide labels even on hover/emphasis
+							},
+							labelLine: {
+								show: false // Hide label lines even on hover/emphasis
+							}
 						},
 						// Better animation
 						animationType: 'scale',
@@ -405,10 +511,38 @@ export default defineComponent({
 					},
 					tooltip: {
 						trigger: 'item',
+						appendToBody: true, // Render tooltip in document body to escape container constraints
+						confine: false, // Allow tooltip to be positioned outside chart area
+						// Dynamic positioning to ensure all items are visible
+						position: function (point, params, dom, rect, size) {
+							const viewWidth = size.viewSize[0];
+							const viewHeight = size.viewSize[1];
+							const tooltipWidth = size.contentSize[0];
+							const tooltipHeight = size.contentSize[1];
+							
+							let x = point[0] + 10;
+							let y = point[1] + 10;
+							
+							if (x + tooltipWidth > viewWidth) {
+								x = point[0] - tooltipWidth - 10;
+							}
+							if (y + tooltipHeight > viewHeight) {
+								if (point[1] - tooltipHeight - 10 > 0) {
+									y = point[1] - tooltipHeight - 10;
+								} else {
+									y = 10;
+								}
+							}
+							if (y < 10) y = 10;
+							if (x < 10) x = 10;
+							
+							return [x, y];
+						},
 						formatter: (params) => {
 							const seg = percentageData[params.dataIndex];
 							return `${seg.name}: ${seg.percentage.toFixed(1)}%`;
-						}
+						},
+						extraCssText: 'z-index: 99999 !important;'
 					},
 					grid: {
 						left: '3%',
@@ -478,7 +612,8 @@ export default defineComponent({
 					});
 					
 					// Calculate max value for label display threshold
-					const maxValue = Math.max(...values.filter(v => typeof v === 'number' && !isNaN(v)));
+					const validValues = values.filter(v => typeof v === 'number' && !isNaN(v) && isFinite(v));
+					const maxValue = validValues.length > 0 ? Math.max(...validValues) : 0;
 					
 					return {
 						name: dataset.name,
@@ -579,42 +714,49 @@ export default defineComponent({
 				const legendGapPx = 20; // Fixed gap between legend and chart
 				const gridTopPx = legendTopPx + 40 + legendGapPx; // Legend height (~40px) + gap
 				
-				// Fixed chart data area height - this MUST remain constant (section 1)
-				// This is the height of the actual chart visualization area
-				const fixedChartDataAreaHeight = 500;
+				// Fixed chart data area height - this MUST remain constant
+				// This is the height of the actual chart visualization area (grid area)
+				const fixedChartDataAreaHeight = 400;
 				
 				// Calculate space needed for labels below the grid
 				// This will be used to calculate canvas height
 				// The grid bottom will be calculated to maintain fixed chart data area height
 				// FIXED gap between labels and dataZoom to maintain consistent UI
 				const dataZoomHeight = 20; // Height of dataZoom slider
-				const fixedGap = 5; // Fixed gap between labels and dataZoom (always constant)
-				const bottomMargin = 10; // Fixed bottom margin
-				const fixedGapTotal = fixedGap + dataZoomHeight + bottomMargin; // Always 35px total
+				const fixedGap = 15; // Increased gap between labels and dataZoom to prevent overlap
+				const bottomMargin = 10; // Increased bottom margin for better spacing
+				const fixedGapTotal = fixedGap + dataZoomHeight + bottomMargin; // Total: 45px
 				
 				// Calculate label height needed (can vary, but cap at reasonable maximum)
-				let labelHeight = 30; // Base label height
+				let labelHeight = 35; // Base label height (slightly increased)
 				if (isRotated) {
-					// For rotated labels, calculate space but cap at maximum
-					// Cap at 120px to prevent excessive space
-					labelHeight = Math.min(120, Math.max(40, maxLabelLength * 5));
+					// For rotated labels, calculate space more accurately
+					// Rotated labels need ~6-8px per character
+					labelHeight = Math.min(150, Math.max(50, maxLabelLength * 6.5));
 				} else {
 					if (maxLabelLength > 50) {
-						// Very long labels might wrap, but cap at reasonable maximum
-						labelHeight = Math.min(100, Math.ceil(maxLabelLength / 10) * 15);
+						// Very long labels might wrap, need more space
+						labelHeight = Math.min(120, Math.ceil(maxLabelLength / 8) * 18);
 					} else {
-						labelHeight = 30; // Base label height
+						labelHeight = 35; // Base label height
 					}
 				}
+				
+				// Section 1: Dynamic gap between chart grid bottom and x-axis labels
+				// Minimum 200px, but increases when labels are long to prevent overlap with dataZoom
+				// Section 1 must accommodate: labels + gap + dataZoom + margin + buffer
+				// Formula: section1 = max(200, labelHeight + fixedGap + dataZoomHeight + bottomMargin + buffer)
+				// This ensures labels never overlap with the dataZoom slider
+				const minSection1Height = 200; // Increased minimum to ensure no overlap
+				const requiredSpaceForLabels = labelHeight + fixedGap + dataZoomHeight + bottomMargin + 10; // Added 10px buffer
+				const section1Height = Math.max(minSection1Height, requiredSpaceForLabels);
 				
 				// Total space = label height (variable, capped) + fixed gap (always constant)
 				const labelSpaceNeeded = labelHeight + fixedGapTotal;
 				
-				// Grid bottom will be calculated dynamically to maintain fixed chart data area height
-				// Grid area = canvasHeight - gridTop - gridBottom = fixedChartDataAreaHeight
-				// So: gridBottom = canvasHeight - gridTop - fixedChartDataAreaHeight
-				// For now, use labelSpaceNeeded as a placeholder (will be recalculated in return function)
-				const gridBottomPx = labelSpaceNeeded;
+				// Grid bottom is set to section1Height to maintain proper spacing
+				// The grid area itself remains at fixedChartDataAreaHeight (400px)
+				const gridBottomPx = section1Height;
 				
 				// Configure y-axis to maintain consistent visual height
 				// If range is very small, expand it to show variations clearly
@@ -646,13 +788,31 @@ export default defineComponent({
 
 				// Check if "Others" is in the labels and ensure it's visible initially
 				const othersIndex = filteredLabels.indexOf('Others');
-				let initialEnd = Math.min(100, filteredLabels.length > 20 ? (20 / filteredLabels.length) * 100 : 100);
+				
+				// Always show at least 20 items or 10% of data, whichever is larger
+				// This ensures we see some chart data on initial render
+				const minItemsToShow = 20;
+				const minPercentToShow = 10; // Always show at least 10% of data
+				
+				let initialEnd;
+				if (filteredLabels.length <= minItemsToShow) {
+					// If we have 20 or fewer items, show all
+					initialEnd = 100;
+				} else {
+					// Show at least minItemsToShow items, but ensure at least minPercentToShow% is visible
+					const itemsPercent = (minItemsToShow / filteredLabels.length) * 100;
+					initialEnd = Math.max(minPercentToShow, Math.min(100, itemsPercent));
+				}
+				
 				// If "Others" exists and is beyond the initial view, adjust to include it
-				if (othersIndex !== -1 && othersIndex >= 20) {
+				if (othersIndex !== -1 && othersIndex >= minItemsToShow) {
 					// Include "Others" by showing up to its position + a bit more for context
 					const othersEndPercent = ((othersIndex + 1) / filteredLabels.length) * 100;
-					initialEnd = Math.min(100, othersEndPercent + 5); // Add 5% buffer
+					initialEnd = Math.min(100, Math.max(initialEnd, othersEndPercent + 5)); // Add 5% buffer, but don't go below minimum
 				}
+				
+				// Ensure we always show at least some data (minimum 5%)
+				initialEnd = Math.max(5, Math.min(100, initialEnd));
 
 				return {
 					// Explicitly hide title when chart has data
@@ -661,10 +821,89 @@ export default defineComponent({
 					},
 					tooltip: {
 						trigger: 'axis',
-						axisPointer: {
-							type: props.type === 'line' ? 'cross' : 'shadow'
+						appendToBody: true, // Render tooltip in document body to escape container constraints
+						confine: false, // Allow tooltip to be positioned outside chart area
+						// Dynamic positioning to ensure all items are visible
+						position: function (point, params, dom, rect, size) {
+							// point: mouse position [x, y]
+							// params: tooltip content params
+							// dom: tooltip DOM element
+							// rect: chart area rect
+							// size: tooltip size {contentSize: [width, height], viewSize: [width, height]}
+							
+							const viewWidth = size.viewSize[0];
+							const viewHeight = size.viewSize[1];
+							const tooltipWidth = size.contentSize[0];
+							const tooltipHeight = size.contentSize[1];
+							
+							// Default position (below and to the right of cursor)
+							let x = point[0] + 10;
+							let y = point[1] + 10;
+							
+							// Check if tooltip goes off right edge
+							if (x + tooltipWidth > viewWidth) {
+								x = point[0] - tooltipWidth - 10; // Position to the left of cursor
+							}
+							
+							// Check if tooltip goes off bottom edge
+							if (y + tooltipHeight > viewHeight) {
+								// Try positioning above cursor
+								if (point[1] - tooltipHeight - 10 > 0) {
+									y = point[1] - tooltipHeight - 10;
+								} else {
+									// If not enough space above, position at top of viewport
+									y = 10;
+								}
+							}
+							
+							// Check if tooltip goes off top edge
+							if (y < 10) {
+								y = 10; // Keep 10px margin from top
+							}
+							
+							// Check if tooltip goes off left edge
+							if (x < 10) {
+								x = 10; // Keep 10px margin from left
+							}
+							
+							return [x, y];
 						},
-						// Enhanced tooltip formatting with full label text
+						axisPointer: {
+							type: props.type === 'line' ? 'cross' : 'shadow',
+							// Show tooltip label with full text when hovering over axis
+							label: {
+								show: true,
+								formatter: (params) => {
+									// Get the full label (not truncated) from filteredLabels
+									if (params && params.value !== undefined) {
+										// Try to find the full label by matching the displayed (truncated) value
+										const displayedValue = formatLabelForDisplay(params.value);
+										const labelIndex = filteredLabels.findIndex(label => {
+											const displayedLabel = formatLabelForDisplay(label);
+											return displayedLabel === displayedValue || label === params.value;
+										});
+										if (labelIndex !== -1) {
+											return filteredLabels[labelIndex];
+										}
+										// Fallback: try to find by dataIndex if available
+										if (params.dataIndex !== undefined && filteredLabels[params.dataIndex]) {
+											return filteredLabels[params.dataIndex];
+										}
+									}
+									return params?.value || '';
+								},
+								backgroundColor: 'rgba(50, 50, 50, 0.9)',
+								borderColor: '#333',
+								borderWidth: 1,
+								padding: [4, 8],
+								textStyle: {
+									color: '#fff',
+									fontSize: 12
+								},
+								extraCssText: 'z-index: 99999 !important;'
+							}
+						},
+						// Enhanced tooltip formatting with full label text - using grid layout
 						formatter: (params) => {
 							if (!params || !Array.isArray(params)) return '';
 							// Get the full label (not truncated) - use original label from filteredLabels
@@ -672,18 +911,57 @@ export default defineComponent({
 							const fullLabel = labelIndex !== undefined && filteredLabels[labelIndex] 
 								? filteredLabels[labelIndex] 
 								: (params[0]?.axisValue || '');
-							let tooltipContent = `<div style="margin-bottom: 8px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 4px; max-width: 400px; word-wrap: break-word;">${fullLabel}</div>`;
+							
+							// Calculate grid columns dynamically to keep rows under 18
+							const itemCount = params.length;
+							const maxRows = 18; // Maximum number of rows to show all items at a glance (strictly less than 18)
+							
+							// Calculate optimal number of columns to keep rows < 18
+							let columns;
+							if (itemCount <= 4) {
+								// For very few items, use 1 column per item
+								columns = itemCount;
+							} else if (itemCount <= 8) {
+								// For small counts, use 4 columns max
+								columns = 4;
+							} else {
+								// For larger counts, calculate columns to ensure rows < 18
+								// We want: Math.ceil(itemCount / columns) < 18
+								// Which means: itemCount / columns < 18
+								// So: columns > itemCount / 18
+								// Therefore: columns = Math.ceil(itemCount / (maxRows - 1)) to ensure rows < 18
+								columns = Math.ceil(itemCount / (maxRows - 1));
+								// Ensure minimum of 3 columns for readability, and maximum reasonable limit
+								columns = Math.max(3, Math.min(columns, 15)); // Cap at 15 columns for very large datasets
+							}
+							
+							// Calculate actual rows with this column count
+							let actualRows = Math.ceil(itemCount / columns);
+							
+							// If rows still >= maxRows, increase columns further to ensure rows < 18
+							while (actualRows >= maxRows && columns < 20) {
+								columns++;
+								actualRows = Math.ceil(itemCount / columns);
+							}
+							
+							// Calculate max-width based on column count (more columns = wider tooltip)
+							const maxWidth = Math.min(600 + (columns - 3) * 100, 1200); // Scale width with columns, max 1200px
+							
+							let tooltipContent = `<div style="margin-bottom: 8px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 4px; max-width: ${maxWidth}px; word-wrap: break-word; word-break: break-word; overflow-wrap: break-word;">${fullLabel}</div>`;
+							tooltipContent += `<div style="display: grid; grid-template-columns: repeat(${columns}, 1fr); gap: 8px 12px; max-width: ${maxWidth}px;">`;
+							
 							params.forEach((param) => {
 								const value = typeof param.value === 'number' 
 									? param.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 									: param.value;
 								const color = param.color || '#333';
-								tooltipContent += `<div style="margin: 4px 0; display: flex; align-items: center;">
-									<span style="display: inline-block; width: 10px; height: 10px; background-color: ${color}; margin-right: 8px; border-radius: 2px;"></span>
-									<span style="margin-right: 12px; flex-shrink: 0;">${truncateLabel(param.seriesName, 30)}:</span>
-									<span style="font-weight: bold;">${value}</span>
+								tooltipContent += `<div style="display: flex; align-items: center; flex-wrap: nowrap; min-width: 0;">
+									<span style="display: inline-block; width: 10px; height: 10px; background-color: ${color}; margin-right: 6px; border-radius: 2px; flex-shrink: 0;"></span>
+									<span style="font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 4px;">${truncateLabel(param.seriesName, 15)}:</span>
+									<span style="font-weight: bold; flex-shrink: 0;">${value}</span>
 								</div>`;
 							});
+							tooltipContent += '</div>';
 							return tooltipContent;
 						},
 						backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -694,7 +972,7 @@ export default defineComponent({
 							color: '#333',
 							fontSize: 12
 						},
-						extraCssText: 'box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;'
+						extraCssText: 'box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px; max-width: 1200px; z-index: 99999 !important;'
 					},
 					legend: {
 						data: legendItems,
@@ -728,11 +1006,10 @@ export default defineComponent({
 						left: '3%',
 						right: '10%', // Increased right margin to accommodate vertical dataZoom slider (20px width + gap)
 						top: `${gridTopPx}px`, // Fixed pixel position to maintain consistent gap
-						// Grid bottom will be calculated to maintain fixed chart data area height
-						// The grid area = canvasHeight - gridTop - gridBottom = fixedChartDataAreaHeight
-						// So gridBottom = canvasHeight - gridTop - fixedChartDataAreaHeight
-						// We'll calculate this dynamically, but for now use labelSpaceNeeded
-						bottom: `${labelSpaceNeeded}px`, // Space for labels - will maintain fixed grid area
+						// Grid bottom is set to section1Height (dynamic, min 190px) to maintain gap between grid and labels
+						// The grid area itself remains at fixedChartDataAreaHeight (400px)
+						// Section 1 = gap between grid bottom and x-axis labels (adjusts based on label height to prevent overlap)
+						bottom: `${section1Height}px`, // Dynamic gap (section 1) between grid and labels, prevents overlap with dataZoom
 						containLabel: false // Don't contain labels to maintain fixed data area
 					},
 					dataZoom: [
@@ -740,11 +1017,12 @@ export default defineComponent({
 							type: 'slider',
 							show: true,
 							xAxisIndex: [0],
-							// Show first 20 labels by default, but ensure "Others" is visible if present
+							// Show at least some data on initial render (ensured by initialEnd calculation)
 							start: 0,
-							end: initialEnd,
-							bottom: '5px', // Position dataZoom very close to labels
+							end: Math.max(5, Math.min(100, initialEnd)), // Ensure at least 5% is visible
+							bottom: '10px', // Position dataZoom with adequate gap from bottom
 							height: 20,
+							showDataShadow: false, // Disable data shadow labels to avoid textStyle deprecation warning
 							handleIcon: 'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23.1h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
 							handleSize: '80%',
 							handleStyle: {
@@ -753,10 +1031,6 @@ export default defineComponent({
 								shadowColor: 'rgba(0, 0, 0, 0.6)',
 								shadowOffsetX: 2,
 								shadowOffsetY: 2
-							},
-							textStyle: {
-								color: '#333',
-								fontSize: 11
 							},
 							borderColor: '#ccc',
 							// Better visual styling
@@ -784,7 +1058,7 @@ export default defineComponent({
 							type: 'inside',
 							xAxisIndex: [0],
 							start: 0,
-							end: initialEnd,
+							end: Math.max(5, Math.min(100, initialEnd)), // Ensure at least 5% is visible
 							zoomOnMouseWheel: true,
 							moveOnMouseMove: true,
 							moveOnMouseWheel: false
@@ -797,6 +1071,7 @@ export default defineComponent({
 							end: 100,
 							right: '2%', // Positioned outside grid area with gap from chart data
 							width: 20,
+							showDataShadow: false, // Disable data shadow labels to avoid textStyle deprecation warning
 							handleIcon: 'path://M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23.1h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
 							handleSize: '80%',
 							handleStyle: {
@@ -805,10 +1080,6 @@ export default defineComponent({
 								shadowColor: 'rgba(0, 0, 0, 0.6)',
 								shadowOffsetX: 2,
 								shadowOffsetY: 2
-							},
-							textStyle: {
-								color: '#333',
-								fontSize: 11
 							},
 							borderColor: '#ccc',
 							// Better visual styling for Y-axis zoom
@@ -905,24 +1176,80 @@ export default defineComponent({
 							}
 						}
 					},
-					series: series,
-					// Add smooth animation for better UX
-					animation: true,
-					animationDuration: 750,
-					animationEasing: 'cubicOut'
+					series: series.map(s => ({
+						...s,
+						// Add click handler for "Others" items
+						onClick: (params) => {
+							// Check if clicked item is "Others"
+							if (params.name === 'Others' || filteredLabels[params.dataIndex] === 'Others') {
+								// Get the _othersData from current chart data
+								const dataToUse = currentChartData.value || props.data;
+								if (dataToUse && dataToUse._othersData) {
+									drillDownIntoOthers(dataToUse._othersData);
+								}
+							}
+						}
+					})),
+					// Disable animation on initial render to ensure chart is visible immediately
+					animation: false, // Set to false for immediate rendering
+					animationDuration: 0, // No animation delay
+					animationEasing: 'linear'
 				};
 			}
 		});
 
 		// Responsive chart container ref
 		const chartContainer = ref(null);
+		// Track if user has hovered over chart to hide the hint message
+		const hasHoveredChart = ref(false);
+		// Responsive hint message position and styling
+		const hintMessageLeft = ref(274);
+		const hintMessageTop = ref(-45); // Default top position
+		const hintFontSize = ref('15px');
+		const hintMaxWidth = ref('calc(100% - 294px)');
+		const hintWhiteSpace = ref('nowrap'); // Allow wrapping on small screens
 		
 		// Resize handler for responsive behavior
 		const handleResize = () => {
 			// Chart will auto-resize via autoresize prop
+			// Update hint message position responsively
+			if (window.innerWidth < 768) {
+				// Small screens: position below legend area, well above chart canvas to avoid overlap
+				// Legend is at top: 20px, legend height ~40px, gap ~20px = ~80px from top
+				// Position text below legend area, well above chart canvas
+				hintMessageLeft.value = 20;
+				hintMessageTop.value = 85; // Position below legend area, well above chart canvas
+				hintFontSize.value = '13px';
+				hintMaxWidth.value = 'calc(100% - 40px)';
+				hintWhiteSpace.value = 'normal'; // Allow wrapping into two lines
+			} else if (window.innerWidth < 1024) {
+				// Medium screens: position to avoid overlap, allow wrapping if needed
+				hintMessageLeft.value = 250;
+				hintMessageTop.value = -45; // Keep original top position
+				hintFontSize.value = '14px';
+				hintMaxWidth.value = 'calc(100% - 270px)';
+				hintWhiteSpace.value = 'normal'; // Allow wrapping into two lines
+			} else {
+				// Large screens: original position, single line
+				hintMessageLeft.value = 274;
+				hintMessageTop.value = -45; // Original top position
+				hintFontSize.value = '15px';
+				hintMaxWidth.value = 'calc(100% - 294px)';
+				hintWhiteSpace.value = 'nowrap'; // Single line on large screens
+			}
+		};
+		
+		// Hide hint message when user hovers over chart
+		const handleChartMouseEnter = () => {
+			hasHoveredChart.value = true;
 		};
 		
 		onMounted(() => {
+			// Initialize responsive hint message position
+			handleResize();
+			// Add resize listener for responsive behavior
+			window.addEventListener('resize', handleResize);
+			
 			nextTick(() => {
 				if (window.ResizeObserver && chartContainer.value) {
 					const resizeObserver = new ResizeObserver(() => {
@@ -935,19 +1262,130 @@ export default defineComponent({
 				} else {
 					window.addEventListener('resize', handleResize);
 				}
+				
+				// Ensure tooltips appear above all elements by setting max z-index
+				// Also ensure tooltips are positioned to show all items within viewport
+				const ensureTooltipZIndex = () => {
+					if (!chartContainer.value) return;
+					
+					// Find tooltip elements in document body (appendToBody tooltips)
+					const tooltipsInBody = document.body.querySelectorAll('div[style*="position"]');
+					
+					tooltipsInBody.forEach((tooltip) => {
+						const style = window.getComputedStyle(tooltip);
+						// Check if it looks like a tooltip (positioned element with content)
+						if ((style.position === 'absolute' || style.position === 'fixed') && 
+						    tooltip.textContent && tooltip.textContent.trim()) {
+							// Set maximum z-index
+							if (parseInt(style.zIndex || '0') < 99999) {
+								tooltip.style.zIndex = '99999';
+							}
+							
+							// Ensure tooltip is positioned to show all items within viewport
+							if (!tooltip._positionAdjusted) {
+								tooltip._positionAdjusted = true;
+								
+								// Use requestAnimationFrame to ensure DOM is ready
+								requestAnimationFrame(() => {
+									const rect = tooltip.getBoundingClientRect();
+									const viewportWidth = window.innerWidth;
+									const viewportHeight = window.innerHeight;
+									
+									let newTop = parseFloat(style.top) || rect.top;
+									let newLeft = parseFloat(style.left) || rect.left;
+									let needsAdjustment = false;
+									
+									// Check if tooltip goes off bottom edge
+									if (rect.bottom > viewportHeight - 10) {
+										// Try to position above the mouse/cursor area
+										// If tooltip height is less than available space above, position it above
+										if (rect.top - rect.height - 10 > 10) {
+											newTop = rect.top - rect.height - 20;
+										} else {
+											// Position at top of viewport with margin
+											newTop = 10;
+										}
+										needsAdjustment = true;
+									}
+									
+									// Check if tooltip goes off top edge
+									if (rect.top < 10) {
+										newTop = 10;
+										needsAdjustment = true;
+									}
+									
+									// Check if tooltip goes off right edge
+									if (rect.right > viewportWidth - 10) {
+										newLeft = viewportWidth - rect.width - 10;
+										needsAdjustment = true;
+									}
+									
+									// Check if tooltip goes off left edge
+									if (rect.left < 10) {
+										newLeft = 10;
+										needsAdjustment = true;
+									}
+									
+									// Apply adjustments
+									if (needsAdjustment) {
+										if (style.position === 'fixed') {
+											tooltip.style.top = `${newTop}px`;
+											tooltip.style.left = `${newLeft}px`;
+										} else if (style.position === 'absolute') {
+											const scrollX = window.scrollX || window.pageXOffset;
+											const scrollY = window.scrollY || window.pageYOffset;
+											tooltip.style.top = `${newTop + scrollY}px`;
+											tooltip.style.left = `${newLeft + scrollX}px`;
+										}
+									}
+								});
+							}
+						}
+					});
+				};
+				
+				// Use MutationObserver to watch for tooltip creation in document body
+				const tooltipObserver = new MutationObserver(() => {
+					ensureTooltipZIndex();
+				});
+				
+				// Observe document body for appendToBody tooltips
+				if (chartContainer.value) {
+					tooltipObserver.observe(document.body, {
+						childList: true,
+						subtree: true,
+						attributes: true,
+						attributeFilter: ['style', 'class']
+					});
+					
+					// Also check periodically as fallback
+					const tooltipCheckInterval = setInterval(ensureTooltipZIndex, 100);
+					
+					// Store for cleanup
+					chartContainer.value._tooltipObserver = tooltipObserver;
+					chartContainer.value._tooltipCheckInterval = tooltipCheckInterval;
+				}
 			});
 		});
 		
 		onUnmounted(() => {
-			if (chartContainer.value && chartContainer.value._resizeObserver) {
-				chartContainer.value._resizeObserver.disconnect();
+			if (chartContainer.value) {
+				if (chartContainer.value._resizeObserver) {
+					chartContainer.value._resizeObserver.disconnect();
+				}
+				if (chartContainer.value._tooltipObserver) {
+					chartContainer.value._tooltipObserver.disconnect();
+				}
+				if (chartContainer.value._tooltipCheckInterval) {
+					clearInterval(chartContainer.value._tooltipCheckInterval);
+				}
 			}
 			window.removeEventListener('resize', handleResize);
 		});
 		
 		return () => {
 			// Base chart data area height - minimum height for the chart visualization
-			const baseChartDataAreaHeight = 500;
+			const baseChartDataAreaHeight = 400;
 			
 			// Calculate total container height to accommodate legend and controls
 			// The canvas height will be dynamic based on label length
@@ -962,11 +1400,14 @@ export default defineComponent({
 			// Start with base height, will be adjusted based on actual label lengths
 			let canvasHeight = baseChartDataAreaHeight + baseGridTopPx + bottomSpaceForLabels;
 			
-			// Use props.data directly - optimizations are already applied:
+			// Always use props.data directly unless we're in drill-down mode
+			const dataToUse = drillDownHistory.value.length > 0 ? (currentChartData.value || props.data) : props.data;
+			
+			// Use dataToUse - optimizations are already applied:
 			// - Top-N is applied after pivot calculation
 			// - LTTB runs in Web Worker if useWorkerOptimization is true
-			if (props.data && props.data.datasets && props.data.labels) {
-				const { labels, datasets } = props.data;
+			if (dataToUse && dataToUse.datasets && dataToUse.labels) {
+				const { labels, datasets } = dataToUse;
 				
 				if (props.type === 'pie') {
 					// For pie charts with vertical legend, calculate based on legend items
@@ -1035,27 +1476,36 @@ export default defineComponent({
 					// Calculate space needed for labels with FIXED gap to dataZoom
 					// The gap between labels and dataZoom must remain constant
 					const dataZoomHeight = 20; // Height of dataZoom slider
-					const fixedGap = 5; // Fixed gap between labels and dataZoom (always constant)
-					const bottomMargin = 10; // Fixed bottom margin
-					const fixedGapTotal = fixedGap + dataZoomHeight + bottomMargin; // Always 35px total
+					const fixedGap = 15; // Increased gap between labels and dataZoom to prevent overlap
+					const bottomMargin = 10; // Increased bottom margin for better spacing
+					const fixedGapTotal = fixedGap + dataZoomHeight + bottomMargin; // Total: 45px
 					
 					// Calculate label height needed (can vary, but cap at reasonable maximum)
-					let labelHeight = 30; // Base label height
+					let labelHeight = 35; // Base label height (slightly increased)
 					if (isRotated) {
-						// For rotated labels, calculate space but cap at maximum
-						// Cap at 120px to prevent excessive space
-						labelHeight = Math.min(120, Math.max(40, maxLabelLength * 5));
+						// For rotated labels, calculate space more accurately
+						// Rotated labels need ~6-8px per character
+						labelHeight = Math.min(150, Math.max(50, maxLabelLength * 6.5));
 					} else {
 						if (maxLabelLength > 50) {
-							// Very long labels might wrap, but cap at reasonable maximum
-							labelHeight = Math.min(100, Math.ceil(maxLabelLength / 10) * 15);
+							// Very long labels might wrap, need more space
+							labelHeight = Math.min(120, Math.ceil(maxLabelLength / 8) * 18);
 						} else {
-							labelHeight = 30; // Base label height
+							labelHeight = 35; // Base label height
 						}
 					}
 					
 					// Total space = label height (variable, capped) + fixed gap (always constant)
 					const labelSpaceNeeded = labelHeight + fixedGapTotal;
+					
+					// Section 1: Dynamic gap between chart grid bottom and x-axis labels
+					// Minimum 200px, but increases when labels are long to prevent overlap with dataZoom
+					// Section 1 must accommodate: labels + gap + dataZoom + margin + buffer
+					// Formula: section1 = max(200, labelHeight + fixedGap + dataZoomHeight + bottomMargin + buffer)
+					// This ensures labels never overlap with the dataZoom slider
+					const minSection1Height = 200; // Increased minimum to ensure no overlap
+					const requiredSpaceForLabels = labelHeight + fixedGap + dataZoomHeight + bottomMargin + 10; // Added 10px buffer
+					const section1Height = Math.max(minSection1Height, requiredSpaceForLabels);
 					
 					// Calculate legend height
 					let legendHeight = 40; // Base legend height
@@ -1065,17 +1515,20 @@ export default defineComponent({
 						legendHeight = estimatedLegendRows * 20 + 40; // Each row ~20px + padding
 					}
 					
-					// Calculate canvas height: legend + gap + fixed chart data area + label space (includes dataZoom)
-					// The fixed chart data area height (section 1) stays constant
-					// Canvas height increases only to accommodate longer labels below the grid
-					// labelSpaceNeeded already includes labels + gap + dataZoom + margin
+					// Calculate canvas height to maintain:
+					// - Grid area (chart visualization) = baseChartDataAreaHeight (400px)
+					// - Section 1 (gap between grid and labels) = section1Height (dynamic, min 190px)
+					// - Labels are positioned within section 1, with dataZoom below
+					// Canvas height = gridTop + gridArea + section1 (which includes space for labels + gap + dataZoom + margin)
 					const barLineGridTopPx = legendTopPx + legendHeight + legendGapPx;
-					canvasHeight = baseChartDataAreaHeight + barLineGridTopPx + labelSpaceNeeded;
+					// Section 1 already includes space for labels + gap + dataZoom + margin
+					// So canvas height = gridTop + gridArea + section1
+					canvasHeight = barLineGridTopPx + baseChartDataAreaHeight + section1Height;
 				}
 			}
 			
-			// Ensure minimum canvas height
-			canvasHeight = Math.max(canvasHeight, 600); // At least 600px total
+			// Ensure canvas height is within bounds: minimum 600px, maximum 800px
+			canvasHeight = Math.max(600, Math.min(canvasHeight, 800)); // Between 600px and 800px
 			
 			// Calculate grid bottom to maintain fixed chart data area height
 			// Grid area = canvasHeight - gridTop - gridBottom = fixedChartDataAreaHeight
@@ -1086,11 +1539,157 @@ export default defineComponent({
 				// Get grid top from the option
 				const gridTopValue = finalChartOption.grid.top;
 				const gridTopNum = typeof gridTopValue === 'string' ? parseFloat(gridTopValue) : (gridTopValue || 80);
-				// Calculate grid bottom to maintain fixed chart data area height (500px)
-				const calculatedGridBottom = canvasHeight - gridTopNum - baseChartDataAreaHeight;
-				// Ensure minimum grid bottom but keep it tight to minimize space between labels and dataZoom
-				finalChartOption.grid.bottom = `${Math.max(45, calculatedGridBottom)}px`;
+				// Section 1: Dynamic gap between chart grid bottom and x-axis labels
+				// We need to recalculate section1Height based on the actual label height from the chart option
+				// Get label height from the chart configuration if available
+				const xAxisConfig = finalChartOption.xAxis;
+				const isRotated = xAxisConfig && xAxisConfig.axisLabel && xAxisConfig.axisLabel.rotate;
+				// Estimate label height based on rotation and label count
+				const filteredLabels = xAxisConfig && xAxisConfig.data ? xAxisConfig.data : [];
+				let estimatedLabelHeight = 30;
+				if (isRotated) {
+					// For rotated labels, calculate based on max label length
+					// Rotated labels need more vertical space
+					const maxLabelLength = filteredLabels.length > 0 ? Math.max(...filteredLabels.map(l => String(l).length)) : 0;
+					// More accurate calculation: rotated labels need ~6-8px per character
+					estimatedLabelHeight = Math.min(150, Math.max(50, maxLabelLength * 6.5));
+				} else if (filteredLabels.length > 0) {
+					const maxLabelLength = Math.max(...filteredLabels.map(l => String(l).length));
+					if (maxLabelLength > 50) {
+						// Long labels might wrap, need more space
+						estimatedLabelHeight = Math.min(120, Math.ceil(maxLabelLength / 8) * 18);
+					} else {
+						estimatedLabelHeight = 35; // Slightly more for non-rotated labels
+					}
+				}
+				// Calculate section1Height dynamically to prevent overlap
+				const dataZoomHeight = 20;
+				const fixedGap = 15; // Increased gap between labels and dataZoom to prevent overlap
+				const bottomMargin = 10; // Increased bottom margin for better spacing
+				const minSection1Height = 200; // Increased minimum to ensure no overlap
+				// Ensure we have enough space: label height + gap + dataZoom + margin + extra buffer
+				const requiredSpaceForLabels = estimatedLabelHeight + fixedGap + dataZoomHeight + bottomMargin + 10; // Added 10px buffer
+				const section1Height = Math.max(minSection1Height, requiredSpaceForLabels);
+				// This maintains the gap between the grid and labels, preventing overlap with dataZoom
+				// The grid area itself remains at baseChartDataAreaHeight (400px)
+				finalChartOption.grid.bottom = `${section1Height}px`;
 			}
+			
+			// Add back button if in drill-down mode
+			const chartElements = [];
+			
+			// Add helpful message overlay to the right of Aggregation dropdown (inline)
+			// Don't show helper text for pie charts
+			if (dataToUse && dataToUse.labels && dataToUse.labels.length > 0 && dataToUse.datasets && dataToUse.datasets.length > 0 && !hasHoveredChart.value && props.type !== 'pie') {
+				// Position it inline with the Aggregation dropdown (which is above the chart)
+				// The dropdown is in a flex container with gap: 10px, so we position to the right
+				// Estimate: "Aggregation:" label (~100px) + select (~200px) + gap (~10px) = ~310px from left
+				// Adjust slightly to the right for perfect alignment (1mm ≈ 3.78px at 96dpi, using ~4px)
+				// The parent container has padding: 20px, and the select has padding: 6px 12px
+				// To align vertically with the select tag, we need to match its padding
+				// The select tag has padding: 6px 12px, so we use similar padding for alignment
+				chartElements.push(
+					h('div', {
+						style: {
+							position: 'absolute',
+							top: `${hintMessageTop.value}px`,
+							left: `${hintMessageLeft.value}px`,
+							zIndex: 1000,
+							backgroundColor: 'rgba(255, 255, 255, 0.98)',
+							padding: '6px 14px', // Match select tag's vertical padding (6px) for alignment
+							borderRadius: '6px',
+							boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+							border: '1px solid #e0e0e0',
+							pointerEvents: 'none', // Allow mouse events to pass through to chart
+							transition: 'opacity 0.5s ease, left 0.3s ease, font-size 0.3s ease, max-width 0.3s ease', // Smooth responsive transitions
+							opacity: hasHoveredChart.value ? 0 : 1,
+							display: 'inline-block', // Changed from inline-flex to allow wrapping
+							maxWidth: hintMaxWidth.value // Responsive max width
+						},
+						class: 'chart-hover-hint'
+					}, [
+						h('div', {
+							style: {
+								fontSize: hintFontSize.value, // Responsive font size
+								color: '#424242',
+								lineHeight: '1.5',
+								fontWeight: 'bold', // Make text bold
+								whiteSpace: hintWhiteSpace.value // Allow wrapping on small screens
+							}
+						}, 'Hover over the chart area to view data details. Use horizontal and vertical zoom bars to see chart data clearly.')
+					])
+				);
+			}
+			
+			if (drillDownHistory.value.length > 0) {
+				chartElements.push(
+					h('button', {
+						onClick: goBack,
+						style: {
+							position: 'absolute',
+							top: '10px',
+							left: '10px',
+							zIndex: 100000,
+							padding: '8px 16px',
+							backgroundColor: '#1976d2',
+							color: '#fff',
+							border: 'none',
+							borderRadius: '4px',
+							cursor: 'pointer',
+							fontSize: '13px',
+							fontWeight: '500',
+							boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+							display: 'flex',
+							alignItems: 'center',
+							gap: '6px'
+						}
+					}, [
+						h('span', { style: { fontSize: '16px' } }, '←'),
+						h('span', {}, 'Back')
+					])
+				);
+			}
+			
+			// Create a key based on data to force re-render when data changes
+			const dataKey = dataToUse ? 
+				`${dataToUse.labels?.length || 0}-${dataToUse.datasets?.length || 0}-${JSON.stringify(dataToUse.labels?.slice(0, 3) || [])}` : 
+				'no-data';
+			
+			chartElements.push(
+				h(VChart, {
+					key: `chart-${props.type}-${dataToUse?.labels?.length || 0}-${dataToUse?.datasets?.length || 0}`, // Force re-render when data changes
+					option: finalChartOption,
+					autoresize: true,
+					notMerge: true, // Force full re-render - don't merge options
+					lazyUpdate: false, // Update immediately
+					onEvents: {
+						mouseenter: handleChartMouseEnter,
+						click: (params) => {
+							// Handle click on chart elements, specifically "Others"
+							if (params) {
+								// For bar/line charts - check if name is "Others"
+								if (params.name === 'Others' || (params.seriesName && params.seriesName.includes('Others'))) {
+									const dataToUse = currentChartData.value || props.data;
+									if (dataToUse && dataToUse._othersData) {
+										drillDownIntoOthers(dataToUse._othersData);
+									}
+								}
+								// For pie charts - check if clicked item name contains "Others"
+								if (params.name && params.name.includes('Others')) {
+									// For pie charts, the _othersData is stored on the pieData array
+									// We need to access it from the chart option or store it separately
+									// The pie chart click is primarily handled in series onClick above
+								}
+							}
+						}
+					},
+					style: {
+						width: '100%',
+						height: '100%',
+						minHeight: '600px'
+					}
+				})
+			);
 			
 			return h('div', {
 				ref: chartContainer,
@@ -1099,19 +1698,10 @@ export default defineComponent({
 					height: `${canvasHeight}px`,
 					minHeight: '600px',
 					position: 'relative',
-					overflow: 'hidden'
-				}
-			}, [
-				h(VChart, {
-					option: finalChartOption,
-					autoresize: true, // Enable automatic resizing for responsive behavior
-					style: {
-						width: '100%',
-						height: '100%',
-						minHeight: '600px'
-					}
-				})
-			]);
+					overflow: 'visible' // Changed from 'hidden' to allow tooltips to escape container
+				},
+				onMouseEnter: handleChartMouseEnter
+			}, chartElements);
 		};
 	}
 });

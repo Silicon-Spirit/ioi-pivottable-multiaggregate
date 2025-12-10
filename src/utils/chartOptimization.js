@@ -304,10 +304,24 @@ export function optimizeChartDataWithTopN(chartData, n = 20, aggregation = 'sum'
 		});
 	}
 
-	return {
+	const result = {
 		labels: filteredLabels,
 		datasets: filteredDatasets
 	};
+	
+	// Store metadata about "Others" for drill-down functionality
+	if (includeOthers && othersIndices.length > 0) {
+		result._othersData = {
+			labels: othersIndices.map(idx => labels[idx]),
+			datasets: datasets.map(dataset => ({
+				...dataset,
+				values: othersIndices.map(idx => dataset.values[idx])
+			})),
+			originalIndices: othersIndices
+		};
+	}
+	
+	return result;
 }
 
 /**
@@ -341,10 +355,15 @@ export function optimizePieDataWithTopN(pieData, n = 20, includeOthers = true) {
 			return sum + val;
 		}, 0);
 
-		topN.push({
+			const othersItem = {
 			name: 'Others',
 			value: othersValue
-		});
+		};
+		
+		topN.push(othersItem);
+		
+		// Store metadata about "Others" for drill-down functionality
+		topN._othersData = others; // Store the original "Others" items
 	}
 
 	return topN;
