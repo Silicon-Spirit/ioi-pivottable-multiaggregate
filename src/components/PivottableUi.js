@@ -235,6 +235,7 @@ export default {
 			openDropdown: false,
 			showControlPanel: true,
 		materializedInput: shallowRef([]),
+			rendererCellRef: null,
 			// Performance optimization: use shallowRef for large pivot results
 			pivotResult: shallowRef(null),
 			isCalculating: false,
@@ -362,6 +363,23 @@ export default {
 			if (Array.isArray(newValue)) {
 				this.updateAggregatorSelection(newValue);
 			}
+		},
+		selectedAggregators: {
+			handler() {
+				this.updateRendererCellWidth();
+			},
+			deep: true,
+		},
+		'propsData.aggregatorVals': {
+			handler() {
+				this.updateRendererCellWidth();
+			},
+			deep: true,
+		},
+		showControlPanel: {
+			handler() {
+				this.updateRendererCellWidth();
+			},
 		},
 	},
 	methods: {
@@ -837,8 +855,6 @@ export default {
 					const result = await pivotWorkerManager.calculatePivot(config);
 					const calcEndTime = performance.now();
 					
-					console.log(`[Performance] Pivot Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
-					
 					// Apply Top-N filtering after pivot calculation
 					const topNThreshold = 50; // Default threshold
 					const enableTopN = true; // Always enable Top-N
@@ -1035,8 +1051,6 @@ export default {
 					colOrder: this.propsData.colOrder
 				});
 				const calcEndTime = performance.now();
-				
-				console.log(`[Performance] Pivot Calculation: ${(calcEndTime - calcStartTime).toFixed(2)}ms for ${this.data.length} records`);
 
 				// Convert to same format as worker result
 				const rowKeys = pivotData.getRowKeys();
@@ -1243,6 +1257,14 @@ export default {
 						"td",
 						{
 							class: ["pvtRenderers pvtVals pvtText"],
+							ref: (el) => { 
+								if (el) {
+									this.rendererCellRef = el;
+									nextTick(() => {
+										this.updateRendererCellWidth();
+									});
+								}
+							},
 						},
 						this.$slots.rendererCell
 					)
@@ -1250,6 +1272,14 @@ export default {
 						"td",
 						{
 							class: ["pvtRenderers"],
+							ref: (el) => { 
+								if (el) {
+									this.rendererCellRef = el;
+									nextTick(() => {
+										this.updateRendererCellWidth();
+									});
+								}
+							},
 						},
 						[
 							h(Dropdown, {
@@ -1321,7 +1351,7 @@ export default {
 											h(Dropdown, {
 												style: {
 													display: "inline-block",
-													minWidth: "40px",
+													width: "auto",
 												},
 												values: this.availableAggregators,
 												value: name,
@@ -1332,43 +1362,39 @@ export default {
 											}),
 											// Value dropdown(s) for this aggregator
 											// Always show at least one value dropdown, even if numInputs is 0 (like Count)
+										// Display all value inputs horizontally on one line
 											h(
 												"span",
 												{
 													style: {
-														display: numInputs > 1 ? "flex" : "inline-flex",
-														flexDirection: numInputs > 1 ? "column" : "row",
-														alignItems: numInputs > 1 ? "center" : "center",
-														justifyContent: "center",
-														gap: "1px",
-														marginLeft: "1px",
-														paddingLeft: "1px",
+													display: "inline-flex",
+													flexDirection: "row",
+													alignItems: "center",
+													justifyContent: "flex-start",
+													gap: "2px",
+													marginLeft: "2px",
+													paddingLeft: "2px",
 														borderLeft: "1px solid #e2e8f0",
-														width: numInputs > 1 ? "100%" : "auto",
-														maxWidth: numInputs > 1 ? "100%" : "none",
+													flex: "0 0 auto",
+													flexWrap: "nowrap",
+													whiteSpace: "nowrap",
+													minWidth: 0,
 													},
 												},
 												[
-													// Show "Values:" label only if numInputs > 1, otherwise "Value:"
-													(numInputs > 1 ? numInputs : 1) > 1
-														? h("span", {
+												// Show "Value:" or "Values:" label
+												h("span", {
 																style: {
-																	fontSize: "10px",
-																	color: "#64748b",
-																	fontWeight: "500",
-																	marginBottom: "2px",
-																	width: "100%",
-																},
-															}, "Values:")
-														: h("span", {
-																style: {
-																	fontSize: "10px",
+														fontSize: "9px",
 																	color: "#64748b",
 																	fontWeight: "500",
 																	marginRight: "1px",
+														whiteSpace: "nowrap",
+														flexShrink: 0,
 																},
-															}, "Value:"),
+												}, (numInputs > 1 ? numInputs : 1) > 1 ? "Values:" : "Value:"),
 													// Always show at least one dropdown, use numInputs if > 0, otherwise 1
+												// Display all dropdowns horizontally
 													...new Array(numInputs > 0 ? numInputs : 1).fill().map((n, i) => {
 														// For "Sum over Sum", label the first dropdown as "Numerator" and second as "Denominator"
 														const isSumOverSum = name === __("Sum over Sum");
@@ -1378,33 +1404,31 @@ export default {
 														
 														return h("span", {
 															style: {
-																display: "flex",
+															display: "inline-flex",
 																flexDirection: "row",
 																alignItems: "center",
-																justifyContent: "center",
-																width: numInputs > 1 ? "100%" : "auto",
-																marginBottom: numInputs > 1 && i < (numInputs > 0 ? numInputs : 1) - 1 ? "1px" : "0",
-																marginRight: numInputs > 1 ? "0" : (i < (numInputs > 0 ? numInputs : 1) - 1 ? "1px" : "0"),
+															justifyContent: "flex-start",
+															gap: "1px",
+															marginRight: i < (numInputs > 0 ? numInputs : 1) - 1 ? "2px" : "0",
+															flexShrink: 0,
 															}
 														}, [
 															fieldLabel ? h("span", {
 																style: {
-																	fontSize: "10px",
+																fontSize: "9px",
 																	color: "#64748b",
 																	fontWeight: "500",
 																	marginRight: "1px",
-																	minWidth: numInputs > 1 ? "40px" : "auto",
+																whiteSpace: "nowrap",
 																	flexShrink: 0,
 																}
 															}, fieldLabel) : null,
 															h(Dropdown, {
 																style: {
 																	display: "inline-block",
-																	minWidth: numInputs > 1 ? "40px" : "40px",
-																	width: numInputs > 1 ? "100%" : "auto",
-																	maxWidth: numInputs > 1 ? "100%" : "none",
-																	fontSize: "11px",
-																	flex: numInputs > 1 ? "1" : "0 0 auto",
+																width: "auto",
+																fontSize: "10px",
+																flexShrink: 0,
 																},
 																values: Object.keys(this.attrValues.value || {}).filter(
 																	(e) =>
@@ -1431,6 +1455,8 @@ export default {
 														]);
 													}),
 												],
+										),
+										// Remove button positioned on the right side
 												this.selectedAggregators.length > 1
 													? h(
 															"a",
@@ -1438,6 +1464,10 @@ export default {
 																class: ["pvtAggregatorRemove"],
 																role: "button",
 																title: __('Remove aggregation'),
+														style: {
+															marginLeft: "4px",
+															flexShrink: 0,
+														},
 																onClick: (event) => {
 																	event?.preventDefault?.();
 																	this.removeAggregator(index);
@@ -1446,7 +1476,6 @@ export default {
 															"×"
 													  )
 													: null
-											),
 										]
 									);
 								})
@@ -1505,6 +1534,55 @@ export default {
 							// Old shared value dropdowns removed - each aggregator now has its own value dropdowns
 						]
 					);
+		},
+		updateRendererCellWidth() {
+			// Use multiple nextTick calls to ensure DOM is fully rendered
+			nextTick(() => {
+				nextTick(() => {
+					if (!this.rendererCellRef) return;
+					
+					// Only calculate if control panel is visible (aggregator options are in DOM)
+					if (!this.showControlPanel) {
+						// If control panel is hidden, set to auto
+						this.rendererCellRef.style.setProperty('width', 'auto', 'important');
+						this.rendererCellRef.style.setProperty('min-width', 'auto', 'important');
+						this.rendererCellRef.style.setProperty('max-width', 'none', 'important');
+						return;
+					}
+					
+					// Find the table element containing the aggregator options
+					const tableElement = this.rendererCellRef?.closest?.('.pvtUi');
+					if (!tableElement) return;
+					
+					// Find all aggregator options
+					const aggregatorOptions = tableElement.querySelectorAll('.pvtAggregatorOption');
+					if (!aggregatorOptions || aggregatorOptions.length === 0) {
+						// If no aggregator options, set a default width
+						this.rendererCellRef.style.setProperty('width', 'auto', 'important');
+						this.rendererCellRef.style.setProperty('min-width', 'auto', 'important');
+						this.rendererCellRef.style.setProperty('max-width', 'none', 'important');
+						return;
+					}
+					
+					// Find the widest aggregator option
+					let maxWidth = 0;
+					aggregatorOptions.forEach(option => {
+						const rect = option.getBoundingClientRect();
+						const width = rect.width;
+						if (width > maxWidth) {
+							maxWidth = width;
+						}
+					});
+					
+					// Set renderer cell width to maxWidth + 10px
+					if (maxWidth > 0) {
+						const newWidth = maxWidth + 10;
+						this.rendererCellRef.style.setProperty('width', `${newWidth}px`, 'important');
+						this.rendererCellRef.style.setProperty('min-width', `${newWidth}px`, 'important');
+						this.rendererCellRef.style.setProperty('max-width', `${newWidth}px`, 'important');
+					}
+				});
+			});
 		},
 		outputCell(props, colspan = null) {
 			const attrs = {
@@ -1831,6 +1909,13 @@ export default {
 					maxWidth: "100%",
 					overflow: "hidden",
 					boxSizing: "border-box",
+				},
+				ref: (el) => {
+					if (el) {
+						nextTick(() => {
+							this.updateRendererCellWidth();
+						});
+					}
 				},
 			},
 			[

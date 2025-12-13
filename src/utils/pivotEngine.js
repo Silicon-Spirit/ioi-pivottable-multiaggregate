@@ -320,10 +320,10 @@ export class PivotEngine {
 			collection = this.colTotals[flatColKey];
 		} else if (colKey.length === 0) {
 			collection = this.rowTotals[flatRowKey];
-			// Debug: check if row total exists
-			if (!collection) {
-				console.warn(`[PivotEngine] Row total collection not found for rowKey:`, rowKey, `flatRowKey:`, flatRowKey, `Available keys:`, Object.keys(this.rowTotals));
-			}
+		// Debug: check if row total exists
+		if (!collection) {
+			// Row total collection not found
+		}
 		} else {
 			collection =
 				this.tree[flatRowKey] && this.tree[flatRowKey][flatColKey]

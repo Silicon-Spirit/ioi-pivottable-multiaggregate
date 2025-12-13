@@ -72,11 +72,9 @@ self.onmessage = async (e) => {
 			const processedData = jsonData;
 
 			const processTime = performance.now();
-			const totalDuration = processTime - startTime;
-			
-			console.log(`[Performance] Excel Processing: ${totalDuration.toFixed(2)}ms for ${totalRows} rows`);
+		const totalDuration = processTime - startTime;
 
-			// Send progress updates less frequently to reduce overhead
+		// Send progress updates less frequently to reduce overhead
 			// Only send updates at 25%, 50%, 75%, and 100%
 			const milestones = [0.25, 0.5, 0.75, 1.0];
 			for (const milestone of milestones) {

@@ -188,14 +188,10 @@ self.onmessage = async (e) => {
 					if (aggregator && typeof aggregator.value === 'function') {
 						const value = aggregator.value();
 						// Debug: log for List Unique Values to see what value we're getting
-						const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
-						if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
-							console.log(`[Row Total Debug] Row key:`, rowKey, `Aggregator name:`, aggName, `Value:`, value, `Type:`, typeof value);
-							// Also check if aggregator has uniq array
-							if (aggregator.uniq) {
-								console.log(`[Row Total Debug] Aggregator uniq array:`, aggregator.uniq, `Length:`, aggregator.uniq.length);
-							}
-						}
+					const cleanAggName = aggName.split('(')[0].trim().toLowerCase();
+					if (cleanAggName.includes('list') && cleanAggName.includes('unique')) {
+						// Debug info for List Unique Values aggregator
+					}
 						// For "List Unique Values", ensure we get the raw value (comma-separated string)
 						// The format function should just return the value as-is
 						const formatted = aggregator && typeof aggregator.format === 'function' ? aggregator.format(value) : (value !== null && value !== undefined ? String(value) : '');
@@ -226,10 +222,9 @@ self.onmessage = async (e) => {
 				result.allTotal[aggName] = { value, formatted };
 			}
 
-			self.postMessage({ id, type: 'PIVOT_CALCULATED', result });
-		} catch (error) {
-			console.error('Worker calculation error:', error);
-			self.postMessage({ id, type: 'ERROR', error: error.message, stack: error.stack });
+		self.postMessage({ id, type: 'PIVOT_CALCULATED', result });
+	} catch (error) {
+		self.postMessage({ id, type: 'ERROR', error: error.message, stack: error.stack });
 		}
 	} else if (type === 'OPTIMIZE_CHART_DATA') {
 		try {
@@ -244,7 +239,6 @@ self.onmessage = async (e) => {
 				self.postMessage({ id, type: 'CHART_DATA_OPTIMIZED', chartData });
 			}
 		} catch (error) {
-			console.error('Worker chart optimization error:', error);
 			self.postMessage({ id, type: 'ERROR', error: error.message, stack: error.stack });
 		}
 	}
