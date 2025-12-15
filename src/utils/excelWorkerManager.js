@@ -17,7 +17,6 @@ class ExcelWorkerManager {
 	 */
 	init() {
 		if (!this.isWorkerSupported) {
-			console.warn('[ExcelWorkerManager] Web Workers are not supported in this browser');
 			return false;
 		}
 
@@ -36,24 +35,21 @@ class ExcelWorkerManager {
 				this.handleWorkerMessage(e);
 			};
 
-			// Set up error handler
-			this.worker.onerror = (error) => {
-				console.error('[ExcelWorkerManager] Worker error:', error);
-				this.handleWorkerError(error);
-			};
+		// Set up error handler
+		this.worker.onerror = (error) => {
+			this.handleWorkerError(error);
+		};
 
-			// Set up message error handler (for uncaught errors in worker)
-			this.worker.onmessageerror = (error) => {
-				console.error('[ExcelWorkerManager] Worker message error:', error);
-				this.handleWorkerError(error);
-			};
+		// Set up message error handler (for uncaught errors in worker)
+		this.worker.onmessageerror = (error) => {
+			this.handleWorkerError(error);
+		};
 
-			this.isInitialized = true;
-			this.initError = null;
-			return true;
-		} catch (error) {
-			console.error('[ExcelWorkerManager] Failed to initialize worker:', error);
-			this.initError = error;
+		this.isInitialized = true;
+		this.initError = null;
+		return true;
+	} catch (error) {
+		this.initError = error;
 			this.isInitialized = false;
 			return false;
 		}
@@ -93,12 +89,9 @@ class ExcelWorkerManager {
 				request.resolve(payload);
 				this.pendingRequests.delete(id);
 			}
-			return;
-		}
-
-		// Unknown message type
-		console.warn('[ExcelWorkerManager] Unknown message type:', type);
+		return;
 	}
+}
 
 	/**
 	 * Handle worker errors

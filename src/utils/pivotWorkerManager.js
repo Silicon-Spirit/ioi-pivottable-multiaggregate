@@ -17,7 +17,6 @@ class PivotWorkerManager {
 	 */
 	init() {
 		if (!this.isWorkerSupported) {
-			console.warn('[PivotWorkerManager] Web Workers are not supported in this browser');
 			return false;
 		}
 
@@ -36,24 +35,21 @@ class PivotWorkerManager {
 				this.handleWorkerMessage(e);
 			};
 
-			// Set up error handler
-			this.worker.onerror = (error) => {
-				console.error('[PivotWorkerManager] Worker error:', error);
-				this.handleWorkerError(error);
-			};
+		// Set up error handler
+		this.worker.onerror = (error) => {
+			this.handleWorkerError(error);
+		};
 
-			// Set up message error handler (for uncaught errors in worker)
-			this.worker.onmessageerror = (error) => {
-				console.error('[PivotWorkerManager] Worker message error:', error);
-				this.handleWorkerError(error);
-			};
+		// Set up message error handler (for uncaught errors in worker)
+		this.worker.onmessageerror = (error) => {
+			this.handleWorkerError(error);
+		};
 
-			this.isInitialized = true;
-			this.initError = null;
-			return true;
-		} catch (error) {
-			console.error('[PivotWorkerManager] Failed to initialize worker:', error);
-			this.initError = error;
+		this.isInitialized = true;
+		this.initError = null;
+		return true;
+	} catch (error) {
+		this.initError = error;
 			this.isInitialized = false;
 			return false;
 		}
@@ -94,12 +90,9 @@ class PivotWorkerManager {
 				request.resolve(e.data.chartData);
 				this.pendingRequests.delete(id);
 			}
-			return;
-		}
-
-		// Unknown message type
-		console.warn('[PivotWorkerManager] Received unknown message type:', type);
+		return;
 	}
+}
 
 	/**
 	 * Handle worker errors

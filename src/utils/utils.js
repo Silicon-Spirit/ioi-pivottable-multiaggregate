@@ -267,10 +267,10 @@ const aggregatorTemplates = {
 							const result = fn(this.uniq);
 							// Debug: log for List Unique Values aggregators
 							if (attrName && this.uniq.length > 0) {
-								const isListUnique = typeof result === 'string' && result.includes(',');
-								if (isListUnique || (this.uniq.length === 1 && attrName.includes('mark'))) {
-									console.log(`[Uniques Aggregator Debug] attrName: "${attrName}", uniq.length: ${this.uniq.length}, uniq:`, this.uniq, `result:`, result);
-								}
+							const isListUnique = typeof result === 'string' && result.includes(',');
+							if (isListUnique || (this.uniq.length === 1 && attrName.includes('mark'))) {
+								// Debug info for List Unique Values aggregator
+							}
 							}
 							return result;
 						}

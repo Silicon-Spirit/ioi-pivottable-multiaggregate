@@ -28,6 +28,13 @@
 	overflow-x: auto;
 }
 
+.pvtUi td.pvtVals {
+	overflow: visible;
+	width: auto;
+	min-width: auto;
+	max-width: none;
+}
+
 .pvtUi td.pvtOutput {
 	padding: 0;
 	vertical-align: top;
@@ -179,8 +186,6 @@ table.pvtTable tbody tr th {
 	font-size: 8pt;
 	padding: 5px;
 	vertical-align: middle;
-	position: relative;
-	z-index: 1;
 }
 
 table.pvtTable .pvtColLabel {
@@ -261,7 +266,7 @@ table.pvtTable tbody tr td {
 .pvtAxisContainer,
 .pvtVals {
 	background: #fff;
-	padding: 2px;
+	padding: 0;
 	min-width: 20px;
 	min-height: 20px;
 	border-top-right-radius: 4px;
@@ -269,9 +274,11 @@ table.pvtTable tbody tr td {
 
 .pvtVals {
 	border: 1px solid #e0e0e0 !important;
-	max-width: 180px;
 	width: auto;
-	margin: 2px;
+	min-width: auto;
+	max-width: none;
+	margin: 0;
+	overflow: visible;
 }
 
 .pvtVals.pvtText {
@@ -309,21 +316,21 @@ table.pvtTable tbody tr td {
 .pvtAggregatorAdd,
 .pvtAggregatorRemove {
 	cursor: pointer;
-	width: 20px;
-	height: 20px;
+	width: 18px;
+	height: 18px;
 	display: inline-flex !important;
 	align-items: center;
 	justify-content: center;
 	user-select: none;
 	text-decoration: none !important;
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 600;
-	border-radius: 4px;
+	border-radius: 3px;
 	transition: all 0.2s ease;
 	border: 1px solid;
 	vertical-align: middle;
 	line-height: 1;
-	min-width: 20px;
+	min-width: 18px;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
@@ -353,6 +360,7 @@ table.pvtTable tbody tr td {
 	background: #ffcdd2;
 	color: #c62828;
 	border-color: #ef9a9a;
+	flex-shrink: 0;
 }
 
 .pvtAggregatorRemove:hover {
@@ -379,11 +387,13 @@ table.pvtTable tbody tr td {
 	margin: 2px;
 }
 
-.pvtRenderers,
 .pvtvals,
 .pvtVertList {
-	width: 180px !important;
+	width: auto !important;
+	min-width: auto;
+	max-width: none;
 	margin: 2px !important;
+	overflow: visible;
 }
 
 @media screen and (max-width:576px) {
@@ -452,9 +462,13 @@ table.pvtTable tbody tr td {
 
 .pvtAggregatorOption .pvtDropdown {
 	width: auto !important;
-	min-width: 40px;
+	min-width: auto;
+	max-width: none;
 	margin: 0 !important;
 	flex-shrink: 0;
+	font-size: 10px;
+	padding: 1px 2px;
+	height: 20px;
 }
 
 /* Value dropdowns within aggregator options */
@@ -462,21 +476,31 @@ table.pvtTable tbody tr td {
 	display: inline-flex;
 	align-items: center;
 	gap: 2px;
-	flex-wrap: wrap;
+	flex-wrap: nowrap !important;
+	white-space: nowrap !important;
+	flex-shrink: 0;
 }
 
-/* When aggregator has multiple inputs, stack vertically */
-.pvtAggregatorOption > span[style*="flex-direction: column"] {
-	flex: 1 1 auto;
+/* Value inputs container - always horizontal */
+.pvtAggregatorOption > span {
+	flex: 0 0 auto;
 	min-width: 0;
+	max-width: none;
+	overflow: visible;
+	white-space: nowrap;
 }
 
 .pvtAggregatorOption span .pvtDropdown {
-	min-width: 40px;
+	min-width: auto;
+	max-width: none;
+	width: auto !important;
 	background-color: #e3f2fd !important;
 	border-color: #90caf9 !important;
 	border-width: 1px !important;
 	font-weight: 500;
+	font-size: 10px;
+	padding: 1px 2px;
+	height: 20px;
 }
 
 .pvtAggregatorOption span .pvtDropdown:hover {
@@ -494,42 +518,49 @@ table.pvtTable tbody tr td {
 .pvtVals {
 	white-space: nowrap;
 	vertical-align: top;
-	padding: 2px;
+	padding: 0;
 	display: flex;
 	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	gap: 2px;
-	text-align: center;
+	align-items: flex-start;
+	justify-content: flex-start;
+	gap: 1px;
+	text-align: left;
+	width: auto;
+	min-width: auto;
+	max-width: none;
+	overflow: visible;
 }
 
 /* Center-align all aggregator options */
 .pvtAggregatorList {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 2px;
-	margin-bottom: 2px;
-	width: 100%;
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: flex-start;
+	gap: 1px;
+	margin-bottom: 0;
+	width: auto;
+	min-width: fit-content;
 }
 
 .pvtAggregatorOption {
-	display: flex;
-	flex-direction: row;
+	display: flex !important;
+	flex-direction: row !important;
 	align-items: center;
-	justify-content: center;
+	justify-content: flex-start;
 	gap: 2px;
 	background: #ffffff;
 	border: 1px solid #e0e0e0;
-	padding: 2px 3px;
-	border-radius: 3px;
+	padding: 1px 2px;
+	border-radius: 2px;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 	transition: all 0.2s ease;
-	flex-wrap: wrap;
-	width: 100%;
-	max-width: 100%;
-	overflow: hidden;
+	flex-wrap: nowrap !important;
+	width: auto !important;
+	max-width: none !important;
+	overflow: visible;
 	box-sizing: border-box;
+	min-height: 24px;
+	white-space: nowrap;
 }
 
 .pvtAggregatorOption:hover {
@@ -755,7 +786,7 @@ table.pvtTable tbody tr td {
 }
 
 .pvtFilterBox {
-	z-index: 10000 !important;
+	z-index: 1000 !important;
 	border: 1px solid #e0e0e0;
 	max-width: 400px;
 	min-width: 250px;
@@ -778,26 +809,11 @@ table.pvtTable tbody tr td {
 .pvtUnused,
 .pvtAxisContainer {
 	overflow: visible !important;
-	position: relative;
-	z-index: 1;
 }
 
 .pvtUnused li,
 .pvtAxisContainer li {
 	overflow: visible !important;
-	position: relative;
-	z-index: 1;
-}
-
-/* Ensure filter box appears above table headers */
-.pvtAttr {
-	position: relative !important;
-	z-index: 1;
-}
-
-.pvtAttr .pvtFilterBox {
-	z-index: 10000 !important;
-	position: absolute !important;
 }
 
 .pvtFilterBox input[type='text'] {
@@ -920,8 +936,10 @@ table.pvtTable tbody tr td {
 	
 	.pvtAggregatorOption {
 		padding: 3px 4px;
-		flex-direction: column;
+		flex-direction: row;
 		align-items: center;
+		flex-wrap: nowrap !important;
+		white-space: nowrap;
 	}
 }
 
@@ -986,19 +1004,4 @@ table.pvtTable tbody tr td {
 		transform: translateX(0);
 		opacity: 1;
 	}
-}
-
-/* Ensure all ECharts tooltips have maximum z-index to appear above all elements */
-div[class*="echarts-tooltip"],
-div[id*="echarts"] div[style*="position"],
-div[style*="position: absolute"][style*="pointer-events"],
-div[style*="position: fixed"][style*="pointer-events"],
-/* Target ECharts tooltip containers */
-div[class*="echarts"] > div[style*="position"],
-div[class*="echarts"] div[class*="tooltip"],
-/* More specific selectors for ECharts tooltip elements */
-body > div[style*="position"][style*="z-index"],
-body > div[style*="position: absolute"],
-body > div[style*="position: fixed"] {
-	z-index: 99999 !important;
 }

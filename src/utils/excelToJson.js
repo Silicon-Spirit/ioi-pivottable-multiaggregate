@@ -98,10 +98,9 @@ export async function excelFileToJson(filePath, options = {}) {
 	try {
 		const response = await fetch(filePath);
 		const text = await response.text();
-		return excelToJson(text, options);
-	} catch (error) {
-		console.error('Error reading Excel file:', error);
-		throw error;
-	}
+	return excelToJson(text, options);
+} catch (error) {
+	throw error;
+}
 }
 

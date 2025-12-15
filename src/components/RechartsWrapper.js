@@ -896,10 +896,9 @@ export default defineComponent({
 								borderColor: '#333',
 								borderWidth: 1,
 								padding: [4, 8],
-								textStyle: {
-									color: '#fff',
-									fontSize: 12
-								},
+								// Moved textStyle properties directly to label (ECharts 4.0+)
+								color: '#fff',
+								fontSize: 12,
 								extraCssText: 'z-index: 99999 !important;'
 							}
 						},
@@ -1580,48 +1579,7 @@ export default defineComponent({
 			// Add back button if in drill-down mode
 			const chartElements = [];
 			
-			// Add helpful message overlay to the right of Aggregation dropdown (inline)
-			// Don't show helper text for pie charts
-			if (dataToUse && dataToUse.labels && dataToUse.labels.length > 0 && dataToUse.datasets && dataToUse.datasets.length > 0 && !hasHoveredChart.value && props.type !== 'pie') {
-				// Position it inline with the Aggregation dropdown (which is above the chart)
-				// The dropdown is in a flex container with gap: 10px, so we position to the right
-				// Estimate: "Aggregation:" label (~100px) + select (~200px) + gap (~10px) = ~310px from left
-				// Adjust slightly to the right for perfect alignment (1mm ≈ 3.78px at 96dpi, using ~4px)
-				// The parent container has padding: 20px, and the select has padding: 6px 12px
-				// To align vertically with the select tag, we need to match its padding
-				// The select tag has padding: 6px 12px, so we use similar padding for alignment
-				chartElements.push(
-					h('div', {
-						style: {
-							position: 'absolute',
-							top: `${hintMessageTop.value}px`,
-							left: `${hintMessageLeft.value}px`,
-							zIndex: 1000,
-							backgroundColor: 'rgba(255, 255, 255, 0.98)',
-							padding: '6px 14px', // Match select tag's vertical padding (6px) for alignment
-							borderRadius: '6px',
-							boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-							border: '1px solid #e0e0e0',
-							pointerEvents: 'none', // Allow mouse events to pass through to chart
-							transition: 'opacity 0.5s ease, left 0.3s ease, font-size 0.3s ease, max-width 0.3s ease', // Smooth responsive transitions
-							opacity: hasHoveredChart.value ? 0 : 1,
-							display: 'inline-block', // Changed from inline-flex to allow wrapping
-							maxWidth: hintMaxWidth.value // Responsive max width
-						},
-						class: 'chart-hover-hint'
-					}, [
-						h('div', {
-							style: {
-								fontSize: hintFontSize.value, // Responsive font size
-								color: '#424242',
-								lineHeight: '1.5',
-								fontWeight: 'bold', // Make text bold
-								whiteSpace: hintWhiteSpace.value // Allow wrapping on small screens
-							}
-						}, 'Hover over the chart area to view data details. Use horizontal and vertical zoom bars to see chart data clearly.')
-					])
-				);
-			}
+			// Removed hover hint message as requested
 			
 			if (drillDownHistory.value.length > 0) {
 				chartElements.push(
