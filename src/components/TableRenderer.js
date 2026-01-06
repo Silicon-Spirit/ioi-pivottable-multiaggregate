@@ -540,7 +540,7 @@ function makeRenderer(opts = {}) {
 						formatted === null ||
 						(typeof formatted === "number" && Number.isNaN(formatted));
 					if (isEmpty) {
-						return { formatted: "—", isEmpty: true };
+						return { formatted: "", isEmpty: true };
 					}
 					
 					// Check if this is a string aggregator (like List Unique Values)
@@ -2840,9 +2840,9 @@ const XLSXExportRenderer = {
 					formatted === "" ||
 					formatted === null ||
 					(typeof formatted === "number" && Number.isNaN(formatted));
-				// Match table renderer: show "—" for empty/null values (line 353)
+				// Match table renderer: show "" for empty/null values (line 353)
 				if (isEmpty) {
-					formatted = "—";
+					formatted = "";
 				}
 				row.push(formatted);
 			});
@@ -2868,9 +2868,9 @@ const XLSXExportRenderer = {
 						totalFormatted === "" ||
 						totalFormatted === null ||
 						(typeof totalFormatted === "number" && Number.isNaN(totalFormatted));
-					// Match table renderer: show "—" for empty/null values
+					// Match table renderer: show "" for empty/null values
 					if (isEmpty) {
-						totalFormatted = "—";
+						totalFormatted = "";
 					}
 					row.push(totalFormatted);
 				});
@@ -2916,9 +2916,9 @@ const XLSXExportRenderer = {
 						grandFormatted === "" ||
 						grandFormatted === null ||
 						(typeof grandFormatted === "number" && Number.isNaN(grandFormatted));
-					// Match table renderer: show "—" for empty/null values
+					// Match table renderer: show "" for empty/null values
 					if (isEmpty) {
-						grandFormatted = "—";
+						grandFormatted = "";
 					}
 					totalRow.push(grandFormatted);
 				});
@@ -2971,9 +2971,9 @@ const XLSXExportRenderer = {
 						totalFormatted === "" ||
 						totalFormatted === null ||
 						(typeof totalFormatted === "number" && Number.isNaN(totalFormatted));
-					// Match table renderer: show "—" for empty/null values
+					// Match table renderer: show "" for empty/null values
 					if (isEmpty) {
-						totalFormatted = "—";
+						totalFormatted = "";
 					}
 					totalRow.push(totalFormatted);
 				});
@@ -2999,9 +2999,9 @@ const XLSXExportRenderer = {
 							grandFormatted === "" ||
 							grandFormatted === null ||
 							(typeof grandFormatted === "number" && Number.isNaN(grandFormatted));
-						// Match table renderer: show "—" for empty/null values
+						// Match table renderer: show "" for empty/null values
 						if (isEmpty) {
-							grandFormatted = "—";
+							grandFormatted = "";
 						}
 						totalRow.push(grandFormatted);
 					});

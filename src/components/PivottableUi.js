@@ -1322,40 +1322,57 @@ export default {
 										{
 											class: ["pvtAggregatorOption"],
 											key: `aggregator-${name}-${index}`,
+											style: {
+												display: "flex",
+												flexDirection: "row",
+												alignItems: "center",
+												gap: "4px",
+											},
 										},
 										[
-											h(Dropdown, {
-												style: {
-													display: "inline-block",
-													width: "auto",
-												},
-												values: this.availableAggregators,
-												value: name,
-												title: __('Select the aggregation method for the data'),
-												onInput: (value) => {
-													this.changeAggregator(index, value);
-												},
-											}),
-											// Value dropdown(s) for this aggregator
-											// Always show at least one value dropdown, even if numInputs is 0 (like Count)
-										// Display all value inputs horizontally on one line
 											h(
-												"span",
+												"div",
 												{
 													style: {
-													display: "inline-flex",
-													flexDirection: "row",
-													alignItems: "center",
-													justifyContent: "flex-start",
-													gap: "2px",
-													marginLeft: "2px",
-													paddingLeft: "2px",
-													flex: "0 0 auto",
-													flexWrap: "nowrap",
-													whiteSpace: "nowrap",
-													minWidth: 0,
+														display: "flex",
+														flexDirection: "column",
+														gap: "4px",
+														flex: "1",
 													},
 												},
+												[
+													h(Dropdown, {
+														style: {
+															display: "inline-block",
+															width: "auto",
+														},
+														values: this.availableAggregators,
+														value: name,
+														title: __('Select the aggregation method for the data'),
+														onInput: (value) => {
+															this.changeAggregator(index, value);
+														},
+													}),
+													// Value dropdown(s) for this aggregator
+													// Always show at least one value dropdown, even if numInputs is 0 (like Count)
+													// Display all value inputs horizontally on one line
+													h(
+														"span",
+														{
+															style: {
+																display: "inline-flex",
+																flexDirection: "row",
+																alignItems: "center",
+																justifyContent: "flex-start",
+																gap: "2px",
+																marginLeft: "2px",
+																paddingLeft: "2px",
+																flex: "0 0 auto",
+																flexWrap: "nowrap",
+																whiteSpace: "nowrap",
+																minWidth: 0,
+															},
+														},
 												[
 												// Show "Value:" or "Values:" label
 												h("span", {
@@ -1430,24 +1447,25 @@ export default {
 														]);
 													}),
 												],
-										),
-										// Remove button positioned on the right side
-												this.selectedAggregators.length > 1
-													? h(
-															"a",
-															{
-																class: ["pvtAggregatorRemove"],
-																role: "button",
-																title: __('Remove aggregation'),
-														style: {
-															marginLeft: "4px",
-															flexShrink: 0,
-														},
-																onClick: (event) => {
-																	event?.preventDefault?.();
-																	this.removeAggregator(index);
-																},
+											)
+												]
+											),
+											// Remove button positioned on the right side
+											this.selectedAggregators.length > 1
+												? h(
+														"a",
+														{
+															class: ["pvtAggregatorRemove"],
+															role: "button",
+															title: __('Remove aggregation'),
+															style: {
+																flexShrink: 0,
 															},
+															onClick: (event) => {
+																event?.preventDefault?.();
+																this.removeAggregator(index);
+															},
+														},
 															"×"
 													  )
 													: null
