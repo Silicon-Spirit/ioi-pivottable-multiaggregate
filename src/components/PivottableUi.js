@@ -283,8 +283,11 @@ export default {
 		this.propsData.vals = this.vals.slice();
 		this.propsData.rows = [...this.rows];
 		this.propsData.cols = [...this.cols];
-		// Initialize aggregatorVals if not already set
-		if (!this.propsData.aggregatorVals || Object.keys(this.propsData.aggregatorVals).length === 0) {
+
+		// Initialize aggregatorVals from prop or default to empty
+		if (this.aggregatorVals && Object.keys(this.aggregatorVals).length > 0) {
+			this.propsData.aggregatorVals = this.aggregatorVals;
+		} else if (!this.propsData.aggregatorVals || Object.keys(this.propsData.aggregatorVals).length === 0) {
 			this.propsData.aggregatorVals = {};
 		}
 		const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
