@@ -2,13 +2,13 @@
 import Pivottable from "../components/Pivottable.js";
 import PivottableUi from "../components/PivottableUi.js";
 import TableRenderer, { makeRenderer } from "../components/TableRenderer.js";
-import { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs, PivotData } from "../utils/utils.js";
+import { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs } from "../utils/utils.js";
 
 // Export main components
 export { Pivottable, PivottableUi, TableRenderer, makeRenderer };
 
 // Export utilities
-export { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs, PivotData };
+export { aggregators, aggregatorTemplates, derivers, locales, naturalSort, numberFormat, getSort, sortAs };
 
 // Default export - export as named to avoid warnings
 const Vue3Pivottable = {
@@ -24,7 +24,6 @@ const Vue3Pivottable = {
 	numberFormat,
 	getSort,
 	sortAs,
-	PivotData,
 };
 
 export { Vue3Pivottable as default };
