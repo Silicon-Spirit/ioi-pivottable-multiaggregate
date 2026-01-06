@@ -175,7 +175,6 @@ table.pvtTable {
 	text-align: left;
 	border-collapse: separate;
 	border-spacing: 0;
-	border: 1px solid #c8d4e3;
 	margin: 0;
 }
 
@@ -538,24 +537,24 @@ table.pvtTable tbody tr td {
 	align-items: flex-start;
 	gap: 1px;
 	margin-bottom: 0;
-	width: auto;
+	width: 100%;
 	min-width: fit-content;
 }
 
 .pvtAggregatorOption {
 	display: flex !important;
-	flex-direction: row !important;
+	flex-direction: column !important;
 	align-items: center;
 	justify-content: flex-start;
 	gap: 2px;
 	background: #ffffff;
-	border: 1px solid #e0e0e0;
+	border-bottom: 1px solid #e0e0e0;
 	padding: 1px 2px;
 	border-radius: 2px;
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 	transition: all 0.2s ease;
 	flex-wrap: nowrap !important;
-	width: auto !important;
+	width: 100% !important;
 	max-width: none !important;
 	overflow: visible;
 	box-sizing: border-box;

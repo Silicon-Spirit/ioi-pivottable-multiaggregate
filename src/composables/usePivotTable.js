@@ -21,7 +21,7 @@ export function usePivotTable(options = {}) {
 		initialRows = [],
 		initialCols = [],
 		initialVals = [],
-		initialAggregatorNames = ['Count', 'Sum'],
+		initialAggregatorNames = [],
 	} = options;
 
 	// State
@@ -43,7 +43,7 @@ export function usePivotTable(options = {}) {
 		rows.value = [];
 		cols.value = [];
 		vals.value = [];
-		aggregatorNames.value = ['Count', 'Sum'];
+		aggregatorNames.value = [];
 	};
 
 	/**
@@ -90,7 +90,7 @@ export function usePivotTable(options = {}) {
 	 * @param {Array} newAggregatorNames - New aggregator names
 	 */
 	const setAggregatorNames = (newAggregatorNames) => {
-		aggregatorNames.value = Array.isArray(newAggregatorNames) ? [...newAggregatorNames] : ['Count', 'Sum'];
+		aggregatorNames.value = Array.isArray(newAggregatorNames) ? [...newAggregatorNames] : [];
 	};
 
 	/**

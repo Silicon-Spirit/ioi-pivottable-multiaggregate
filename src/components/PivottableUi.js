@@ -140,12 +140,6 @@ export default {
 			if (Array.isArray(this.aggregatorNames) && this.aggregatorNames.length) {
 				return this.aggregatorNames;
 			}
-			const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
-				Object.keys(aggregators).includes(name)
-			);
-			if (preferredDefaults.length) {
-				return preferredDefaults;
-			}
 			const fallback =
 				this.propsData.aggregatorName ||
 				(this.aggregatorName && !Array.isArray(this.aggregatorName)
@@ -290,9 +284,6 @@ export default {
 		} else if (!this.propsData.aggregatorVals || Object.keys(this.propsData.aggregatorVals).length === 0) {
 			this.propsData.aggregatorVals = {};
 		}
-		const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
-			Object.keys(aggregators).includes(name)
-		);
 		const initialAggregators =
 			Array.isArray(this.aggregatorNames) && this.aggregatorNames.length
 				? this.aggregatorNames.slice()
@@ -303,18 +294,9 @@ export default {
 							(this.aggregatorName && typeof this.aggregatorName === "string"
 								? this.aggregatorName
 								: null) ||
-							preferredDefaults[0] ||
 							Object.keys(aggregators)[0],
-				  ];
-		if (!initialAggregators.length && preferredDefaults.length) {
-			initialAggregators.push(...preferredDefaults);
-		} else if (preferredDefaults.length) {
-			preferredDefaults.forEach((name) => {
-				if (!initialAggregators.includes(name)) {
-					initialAggregators.push(name);
-				}
-			});
-		}
+				  ]
+				.filter(Boolean);
 		this.updateAggregatorSelection(initialAggregators);
 		this.unusedOrder = this.unusedAttrs;
 		Object.keys(this.attrValues.value || {}).map(this.assignValue);
@@ -350,16 +332,7 @@ export default {
 			if (Array.isArray(newValue)) {
 				this.updateAggregatorSelection(newValue);
 			} else if (typeof newValue === "string") {
-				const preferredDefaults = [__("Count"), __("Sum")].filter((name) =>
-					Object.keys(aggregators).includes(name)
-				);
-				const next = [newValue];
-				preferredDefaults.forEach((name) => {
-					if (!next.includes(name)) {
-						next.push(name);
-					}
-				});
-				this.updateAggregatorSelection(next);
+				this.updateAggregatorSelection([newValue]);
 			}
 		},
 		aggregatorNames(newValue) {
@@ -1377,7 +1350,6 @@ export default {
 													gap: "2px",
 													marginLeft: "2px",
 													paddingLeft: "2px",
-														borderLeft: "1px solid #e2e8f0",
 													flex: "0 0 auto",
 													flexWrap: "nowrap",
 													whiteSpace: "nowrap",
